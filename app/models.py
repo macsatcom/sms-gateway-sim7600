@@ -118,3 +118,22 @@ class PortInfo(BaseModel):
 
 class PortScanResponse(BaseModel):
     ports: list[PortInfo]
+
+
+# ── GPS models ─────────────────────────────────────────────────────────────────
+
+class GpsStatusResponse(BaseModel):
+    running: bool
+    streaming: bool
+
+
+class GpsLocationResponse(BaseModel):
+    fix: bool
+    latitude: Optional[float]
+    longitude: Optional[float]
+    altitude_m: Optional[float]
+    speed_kmh: Optional[float]
+    course_deg: Optional[float]
+    hdop: Optional[float]
+    satellites_in_view: Optional[int]
+    utc_datetime: Optional[str]

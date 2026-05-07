@@ -20,6 +20,7 @@ services:
       API_KEY:     ${API_KEY:-}
       SIM_PIN:     ${SIM_PIN:-}
       LOG_DB:      ${LOG_DB:-/data/sms-gateway.db}
+      GPS_AUTOSTART: ${GPS_AUTOSTART:-0}
       DEBUG:       ${DEBUG:-0}
       PYTHONUNBUFFERED: "1"
     restart: unless-stopped

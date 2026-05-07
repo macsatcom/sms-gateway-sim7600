@@ -13,6 +13,8 @@ from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, ModemError, ModemManager
 from models import (
     AtCommandResponse,
     DeleteResponse,
+    GpsLocationResponse,
+    GpsStatusResponse,
     HealthResponse,
     LogEntry,
     LogResponse,
@@ -366,3 +368,76 @@ def debug_ports():
             "error": r.get("error"),
         })
     return {"ports": ports}
+
+
+# ── GPS endpoints ──────────────────────────────────────────────────────────────
+
+@app.get(
+    "/gps/status",
+    response_model=GpsStatusResponse,
+    tags=["GPS"],
+    summary="GPS module status",
+    dependencies=[Depends(require_api_key)],
+)
+def get_gps_status():
+    """Return whether the GPS module is running and which mode it is in."""
+    try:
+        return state.modem.get_gps_status()
+    except ModemError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post(
+    "/gps/start",
+    response_model=GpsStatusResponse,
+    tags=["GPS"],
+    summary="Start the GPS module",
+    dependencies=[Depends(require_api_key)],
+)
+def gps_start():
+    """
+    Power on the GNSS module in standalone mode.
+
+    After starting, allow 30–60 seconds outdoors for a first fix.
+    Set GPS_AUTOSTART=1 in .env to start GPS automatically on daemon startup.
+    """
+    try:
+        return state.modem.gps_start()
+    except ModemError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.post(
+    "/gps/stop",
+    response_model=GpsStatusResponse,
+    tags=["GPS"],
+    summary="Stop the GPS module",
+    dependencies=[Depends(require_api_key)],
+)
+def gps_stop():
+    """Power off the GNSS module to save power."""
+    try:
+        return state.modem.gps_stop()
+    except ModemError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get(
+    "/gps/location",
+    response_model=GpsLocationResponse,
+    tags=["GPS"],
+    summary="Current GPS location",
+    dependencies=[Depends(require_api_key)],
+)
+def get_gps_location():
+    """
+    Return the current position from the GNSS module.
+
+    Returns latitude, longitude, altitude, speed, course, HDOP, satellite count,
+    and UTC timestamp. Requires GPS to be started and a fix to be acquired.
+    Returns 503 if GPS is not running or no fix is available yet.
+    """
+    try:
+        return state.modem.get_gps_location()
+    except ModemError as e:
+        raise HTTPException(status_code=503, detail=str(e))

@@ -12,8 +12,9 @@ import serial
 MODEM_PORT  = os.environ.get("MODEM_PORT",  "/dev/ttyUSB2")
 BAUD_RATE   = int(os.environ.get("BAUD_RATE", "115200"))
 CMD_TIMEOUT = float(os.environ.get("CMD_TIMEOUT", "5.0"))
-SIM_PIN     = os.environ.get("SIM_PIN", "")
-DEBUG       = os.environ.get("DEBUG", "0").lower() in ("1", "true", "yes")
+SIM_PIN      = os.environ.get("SIM_PIN", "")
+DEBUG        = os.environ.get("DEBUG", "0").lower() in ("1", "true", "yes")
+GPS_AUTOSTART = os.environ.get("GPS_AUTOSTART", "0").lower() in ("1", "true", "yes")
 
 
 def _log(msg: str) -> None:
@@ -29,7 +30,9 @@ _CSQ_RE  = re.compile(r'\+CSQ:\s*(\d+),')
 _CREG_RE = re.compile(r'\+CREG:\s*\d+,(\d+)')
 _CREG_SIMPLE_RE = re.compile(r'\+CREG:\s*(\d+)')
 _CMGS_RE = re.compile(r'\+CMGS:\s*(\d+)')
-_CCID_RE = re.compile(r'["\s]?(\d{18,22})["\s]?')
+_CCID_RE    = re.compile(r'["\s]?(\d{18,22})["\s]?')
+_CGPS_RE      = re.compile(r'\+CGPS:\s*(\d+),?(\d*)')
+_CGPSINFO_RE  = re.compile(r'\+CGPSINFO:\s*([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*)')
 
 _CREG_TEXT = {
     "0": "Not registered, not searching",
@@ -53,6 +56,7 @@ class ModemManager:
         self._timeout = timeout
         self._serial: Optional[serial.Serial] = None
         self._lock    = threading.Lock()
+        self._gps_running: Optional[bool] = None  # None = not yet queried
 
     def open(self) -> None:
         # dsrdtr/rtscts=False prevents pyserial from toggling DTR/RTS on open,
@@ -100,6 +104,13 @@ class ModemManager:
         resp = self._send_command('AT+CPMS="SM","SM","SM"')
         if "OK" not in resp:
             raise ModemError(f"AT+CPMS failed: {resp!r}")
+
+        if GPS_AUTOSTART:
+            try:
+                self.gps_start()
+                print("[modem] GPS started (GPS_AUTOSTART=1)", flush=True)
+            except ModemError as e:
+                print(f"[modem] WARNING: GPS autostart failed: {e}", flush=True)
 
     def get_pin_state(self) -> str:
         """Return the raw CPIN state: 'READY', 'SIM PIN', 'SIM PUK', etc."""
@@ -343,6 +354,93 @@ class ModemManager:
         resp = self._send_command("AT+CMGD=1,4", extra_timeout=10.0)
         if "OK" not in resp:
             raise ModemError(f"Delete all failed: {resp.strip()!r}")
+
+    # ── GPS methods ───────────────────────────────────────────────────────────
+
+    def gps_start(self) -> dict:
+        status = self.get_gps_status()
+        if status["running"]:
+            return status  # already on — idempotent
+        resp = self._send_command("AT+CGPS=1,1")
+        if "OK" not in resp:
+            raise ModemError(f"AT+CGPS=1,1 failed: {resp.strip()!r}")
+        self._gps_running = True
+        return {"running": True, "streaming": True}
+
+    def gps_stop(self) -> dict:
+        status = self.get_gps_status()
+        if not status["running"]:
+            return status  # already off — idempotent
+        resp = self._send_command("AT+CGPS=0")
+        if "OK" not in resp:
+            raise ModemError(f"AT+CGPS=0 failed: {resp.strip()!r}")
+        self._gps_running = False
+        return {"running": False, "streaming": False}
+
+    def get_gps_status(self) -> dict:
+        resp = self._send_command("AT+CGPS?")
+        m = _CGPS_RE.search(resp)
+        running   = bool(int(m.group(1))) if m else False
+        streaming = bool(int(m.group(2))) if (m and m.group(2)) else False
+        self._gps_running = running  # keep cached state in sync
+        return {
+            "running":   running,
+            "streaming": streaming,
+        }
+
+    def get_gps_location(self) -> dict:
+        # Use cached state to avoid a round-trip that may lag behind start/stop
+        if self._gps_running is None:
+            self._gps_running = self.get_gps_status()["running"]
+        if not self._gps_running:
+            raise ModemError("GPS not running — call POST /gps/start first")
+
+        resp = self._send_command("AT+CGPSINFO", extra_timeout=2.0)
+        m = _CGPSINFO_RE.search(resp)
+        if not m:
+            raise ModemError(f"Unexpected CGPSINFO response: {resp.strip()!r}")
+
+        # +CGPSINFO: lat,N/S,lon,E/W,date(DDMMYY),time(HHMMSS.sss),alt,speed,course
+        lat_raw, ns, lon_raw, ew, date_raw, time_raw, alt_raw, spd_raw, crs_raw = (
+            g.strip() for g in m.groups()
+        )
+
+        if not lat_raw:
+            raise ModemError("No GPS fix yet — antenna needs clear sky view")
+
+        def _nmea_to_dd(nmea: str, hemi: str, lon: bool) -> float:
+            """Convert NMEA DDDMM.MMMM to decimal degrees."""
+            deg_digits = 3 if lon else 2
+            degrees = float(nmea[:deg_digits])
+            minutes = float(nmea[deg_digits:])
+            dd = degrees + minutes / 60.0
+            return -dd if hemi in ("S", "W") else dd
+
+        def _opt_float(s: str) -> Optional[float]:
+            try:
+                return float(s) if s else None
+            except ValueError:
+                return None
+
+        # Parse date+time: DDMMYY + HHMMSS.sss → ISO-8601
+        utc_iso: Optional[str] = None
+        if len(date_raw) >= 6 and len(time_raw) >= 6:
+            utc_iso = (
+                f"20{date_raw[4:6]}-{date_raw[2:4]}-{date_raw[0:2]}"
+                f"T{time_raw[0:2]}:{time_raw[2:4]}:{time_raw[4:6]}Z"
+            )
+
+        return {
+            "fix":               True,
+            "latitude":          _nmea_to_dd(lat_raw, ns, lon=False),
+            "longitude":         _nmea_to_dd(lon_raw, ew, lon=True),
+            "altitude_m":        _opt_float(alt_raw),
+            "speed_kmh":         _opt_float(spd_raw),
+            "course_deg":        _opt_float(crs_raw),
+            "hdop":              None,
+            "satellites_in_view": None,
+            "utc_datetime":      utc_iso,
+        }
 
     @staticmethod
     def scan_ports(baud: int) -> list[dict]:
