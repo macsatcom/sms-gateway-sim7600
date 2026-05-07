@@ -1,0 +1,25 @@
+# Environment / secrets
+docker/.env
+.token
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Data
+*.db
+*.sqlite3
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*~
