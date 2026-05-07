@@ -22,6 +22,6 @@ RUN pip install --no-cache-dir \
 # ── Application ───────────────────────────────────────────────────────────────
 COPY app/ /app/
 
-EXPOSE ${API_PORT:-8000}
+EXPOSE 8000 8007
 
-CMD sh -c "python3 -m uvicorn main:app --app-dir /app --host 0.0.0.0 --port ${API_PORT:-8000} --log-level info"
+CMD ["python3", "/app/server.py"]

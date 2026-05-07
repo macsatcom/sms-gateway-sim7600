@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Path, Query, Request
+import state
+from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import JSONResponse
+from state import TOKENS, request_logger, require_api_key
 
-from logger import DB_PATH, RequestLogger
 from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, ModemError, ModemManager
 from models import (
     AtCommandResponse,
@@ -28,71 +28,19 @@ from models import (
     TokenStatsResponse,
 )
 
-# ── Persistent request logger ──────────────────────────────────────────────────
-request_logger = RequestLogger(DB_PATH)
-
-# ── Multi-token auth ───────────────────────────────────────────────────────────
-
-def _load_tokens() -> dict[str, str]:
-    """
-    Parse named API tokens from env vars.
-
-    API_KEYS=admin:token1,monitoring:token2   (preferred — multiple named tokens)
-    API_KEY=token                             (legacy — treated as name "default")
-
-    Returns {token_value: name} for O(1) lookup.
-    """
-    raw = os.environ.get("API_KEYS", "").strip()
-    if raw:
-        result: dict[str, str] = {}
-        for pair in raw.split(","):
-            pair = pair.strip()
-            if ":" in pair:
-                name, _, token = pair.partition(":")
-                name, token = name.strip(), token.strip()
-                if name and token:
-                    result[token] = name
-        return result
-    key = os.environ.get("API_KEY", "").strip()
-    if key:
-        return {key: "default"}
-    return {}
-
-
-# {token_value: name}
-TOKENS: dict[str, str] = _load_tokens()
-
-
-def require_api_key(request: Request, x_api_key: Optional[str] = Header(None)) -> str:
-    """Validate X-API-Key, store token name on request state. Returns token name."""
-    if not TOKENS:
-        request.state.token_name = "anonymous"
-        return "anonymous"
-    if not x_api_key:
-        raise HTTPException(status_code=401, detail="X-API-Key header required")
-    name = TOKENS.get(x_api_key)
-    if name is None:
-        raise HTTPException(status_code=401, detail="Invalid API key")
-    request.state.token_name = name
-    return name
-
-
 # ── Lifespan ───────────────────────────────────────────────────────────────────
-modem: ModemManager = None  # type: ignore[assignment]
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global modem
-    modem = ModemManager(MODEM_PORT, BAUD_RATE, CMD_TIMEOUT)
+    state.modem = ModemManager(MODEM_PORT, BAUD_RATE, CMD_TIMEOUT)
     try:
-        modem.open()
+        state.modem.open()
         print(f"[sms-gateway] Modem initialised on {MODEM_PORT}")
     except Exception as e:
         print(f"[sms-gateway] WARNING: Modem init failed: {e}")
     yield
-    if modem._serial and modem._serial.is_open:
-        modem._serial.close()
+    if state.modem._serial and state.modem._serial.is_open:
+        state.modem._serial.close()
         print("[sms-gateway] Serial port closed")
 
 
@@ -151,7 +99,7 @@ _PIN_STATE_TEXT = {
 )
 def get_health():
     """Check whether the modem is connected and responsive. No auth required."""
-    return modem.check_health()
+    return state.modem.check_health()
 
 
 @app.get(
@@ -164,7 +112,7 @@ def get_health():
 def get_status():
     """Return IMSI, CCID, signal strength, and network registration state."""
     try:
-        return modem.get_status()
+        return state.modem.get_status()
     except ModemError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -179,8 +127,8 @@ def get_status():
 def get_pin_status():
     """Check whether the SIM card is unlocked, waiting for a PIN, or PUK-locked."""
     try:
-        state = modem.get_pin_state()
-        return {"state": state, "description": _PIN_STATE_TEXT.get(state, state)}
+        pin_state = state.modem.get_pin_state()
+        return {"state": pin_state, "description": _PIN_STATE_TEXT.get(pin_state, pin_state)}
     except ModemError as e:
         raise HTTPException(status_code=503, detail=str(e))
 
@@ -200,9 +148,9 @@ def submit_pin(req: PinRequest):
     (i.e. SIM_PIN env var was not set). Returns the new PIN state after entry.
     """
     try:
-        modem.enter_pin(req.pin)
-        state = modem.get_pin_state()
-        return {"state": state, "description": _PIN_STATE_TEXT.get(state, state)}
+        state.modem.enter_pin(req.pin)
+        pin_state = state.modem.get_pin_state()
+        return {"state": pin_state, "description": _PIN_STATE_TEXT.get(pin_state, pin_state)}
     except ModemError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -225,7 +173,7 @@ def send_sms(request: Request, req: SmsSendRequest, _: str = Depends(require_api
     """
     request.state.recipient = req.to
     try:
-        mr = modem.send_sms(req.to, req.message)
+        mr = state.modem.send_sms(req.to, req.message)
         return {"ok": True, "message_reference": mr}
     except ModemError as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -251,7 +199,7 @@ def list_sms(
 ):
     """List all SMS messages stored on the SIM card."""
     try:
-        messages = modem.list_sms(status or "ALL")
+        messages = state.modem.list_sms(status or "ALL")
         return {"messages": messages, "count": len(messages)}
     except ModemError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -269,7 +217,7 @@ def read_sms(
 ):
     """Read one SMS message by its SIM storage index."""
     try:
-        return modem.read_sms(index)
+        return state.modem.read_sms(index)
     except ModemError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
@@ -286,7 +234,7 @@ def delete_sms(
 ):
     """Delete one SMS message by its SIM storage index."""
     try:
-        modem.delete_sms(index)
+        state.modem.delete_sms(index)
         return {"ok": True, "deleted": f"index {index}"}
     except ModemError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -302,7 +250,7 @@ def delete_sms(
 def delete_all_sms():
     """Delete all SMS messages from SIM card storage."""
     try:
-        modem.delete_all_sms()
+        state.modem.delete_all_sms()
         return {"ok": True, "deleted": "all"}
     except ModemError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -388,7 +336,7 @@ def debug_at(
     Note: this endpoint has full modem access — treat it as privileged.
     """
     try:
-        response = modem._send_command(cmd)
+        response = state.modem._send_command(cmd)
         return {"command": cmd, "response": response, "ok": True}
     except ModemError as e:
         return {"command": cmd, "response": str(e), "ok": False}
