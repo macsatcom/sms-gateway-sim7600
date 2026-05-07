@@ -26,7 +26,7 @@ from typing import Any, Optional
 SCRIPT_DIR         = Path(__file__).resolve().parent
 DEFAULT_TOKEN_FILE = SCRIPT_DIR / ".token"
 DEFAULT_HOST       = "http://localhost:8000"
-VERSION            = "1.0.0"
+VERSION            = "1.1.0"
 
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
@@ -179,6 +179,41 @@ def _fmt_logs(d: dict) -> str:
     return "\n".join(rows)
 
 
+def _fmt_gps_status(d: dict) -> str:
+    running   = "yes" if d.get("running") else "no"
+    streaming = "yes" if d.get("streaming") else "no"
+    return "\n".join([
+        f"Running:    {running}",
+        f"Streaming:  {streaming}",
+    ])
+
+
+def _fmt_gps_location(d: dict) -> str:
+    if not d.get("fix"):
+        return "No fix."
+
+    def _coord(val, pos, neg):
+        if val is None:
+            return "—"
+        hemi = pos if val >= 0 else neg
+        return f"{abs(val):.6f}°{hemi}"
+
+    lines = [
+        f"Fix:        yes",
+        f"Latitude:   {_coord(d.get('latitude'),  'N', 'S')}",
+        f"Longitude:  {_coord(d.get('longitude'), 'E', 'W')}",
+    ]
+    if d.get("altitude_m") is not None:
+        lines.append(f"Altitude:   {d['altitude_m']:.1f} m")
+    if d.get("speed_kmh") is not None:
+        lines.append(f"Speed:      {d['speed_kmh']:.1f} km/h")
+    if d.get("course_deg") is not None:
+        lines.append(f"Course:     {d['course_deg']:.1f}°")
+    if d.get("utc_datetime"):
+        lines.append(f"UTC:        {d['utc_datetime']}")
+    return "\n".join(lines)
+
+
 def _fmt_ports(d: dict) -> str:
     rows = ["  Port              Status          Response / Error"]
     rows.append("  " + "─" * 70)
@@ -281,6 +316,26 @@ def cmd_logs(args, token):
     _out(r, args.json) if args.json else print(_fmt_logs(r))
 
 
+def cmd_gps_status(args, token):
+    r = _request(args.host, token, "GET", "/gps/status")
+    _out(r, args.json) if args.json else print(_fmt_gps_status(r))
+
+
+def cmd_gps_start(args, token):
+    r = _request(args.host, token, "POST", "/gps/start")
+    _out(r, args.json) if args.json else print(_fmt_gps_status(r))
+
+
+def cmd_gps_stop(args, token):
+    r = _request(args.host, token, "POST", "/gps/stop")
+    _out(r, args.json) if args.json else print(_fmt_gps_status(r))
+
+
+def cmd_gps_location(args, token):
+    r = _request(args.host, token, "GET", "/gps/location")
+    _out(r, args.json) if args.json else print(_fmt_gps_location(r))
+
+
 def cmd_at(args, token):
     r = _request(args.host, token, "GET", "/debug/at", params={"cmd": args.cmd})
     if args.json:
@@ -320,6 +375,10 @@ def build_parser() -> argparse.ArgumentParser:
               %(prog)s read 3
               %(prog)s delete 3
               %(prog)s delete-all
+              %(prog)s gps-start
+              %(prog)s gps-status
+              %(prog)s gps-location
+              %(prog)s gps-stop
               %(prog)s tokens
               %(prog)s logs
               %(prog)s logs --token admin --since 2026-05-01T00:00:00Z
@@ -681,6 +740,73 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.set_defaults(func=cmd_ports)
+
+    # ── gps-status ─────────────────────────────────────────────────────────────
+    p = sub.add_parser(
+        "gps-status",
+        help="Show GPS module status",
+        description=textwrap.dedent("""\
+            GET /gps/status
+
+            Returns whether the GNSS module is running and whether it is
+            streaming NMEA sentences to the serial port.
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(func=cmd_gps_status)
+
+    # ── gps-start ──────────────────────────────────────────────────────────────
+    p = sub.add_parser(
+        "gps-start",
+        help="Power on the GPS module",
+        description=textwrap.dedent("""\
+            POST /gps/start
+
+            Powers on the GNSS module in standalone mode. Idempotent — safe
+            to call even if GPS is already running.
+
+            Allow 30-60 seconds outdoors for the first fix after starting.
+            Set GPS_AUTOSTART=1 in .env to start GPS automatically on boot.
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(func=cmd_gps_start)
+
+    # ── gps-stop ───────────────────────────────────────────────────────────────
+    p = sub.add_parser(
+        "gps-stop",
+        help="Power off the GPS module",
+        description=textwrap.dedent("""\
+            POST /gps/stop
+
+            Powers off the GNSS module to save power. Idempotent — safe
+            to call even if GPS is already stopped.
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(func=cmd_gps_stop)
+
+    # ── gps-location ───────────────────────────────────────────────────────────
+    p = sub.add_parser(
+        "gps-location",
+        help="Get current GPS location",
+        description=textwrap.dedent("""\
+            GET /gps/location
+
+            Returns the current position from the GNSS module: latitude,
+            longitude, altitude, speed, course, and UTC timestamp.
+
+            Returns an error if GPS is not running or no fix has been
+            acquired yet (needs clear sky view, allow 30-60 seconds).
+        """),
+        epilog=textwrap.dedent("""\
+            Examples:
+              sms-cli gps-start && sms-cli gps-location
+              sms-cli --json gps-location | jq '{lat: .latitude, lon: .longitude}'
+        """),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.set_defaults(func=cmd_gps_location)
 
     return parser
 
