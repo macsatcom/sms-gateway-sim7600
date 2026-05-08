@@ -209,6 +209,11 @@ class ModemManager:
         if "OK" not in resp:
             raise ModemError(f"AT+CMGF=1 failed: {resp!r}")
 
+        # Latin-1 charset — covers all Danish/Western European chars (Æ Ø Å æ ø å)
+        resp = self._send_command('AT+CSCS="8859-1"')
+        if "OK" not in resp:
+            print(f"[modem] WARNING: AT+CSCS=\"8859-1\" failed: {resp!r}", flush=True)
+
         # Select SIM storage
         resp = self._send_command('AT+CPMS="SM","SM","SM"')
         if "OK" not in resp:
@@ -251,11 +256,11 @@ class ModemManager:
                 chunk = self._serial.read(max(self._serial.in_waiting, 1))
                 if chunk:
                     buf += chunk
-                    decoded = buf.decode("utf-8", errors="replace")
+                    decoded = buf.decode("latin-1")
                     if wait_for in decoded or "ERROR" in decoded:
                         break
 
-            response = buf.decode("utf-8", errors="replace")
+            response = buf.decode("latin-1")
             _log(f"[modem] << {response!r}")
 
             # Strip echo: first non-empty line often mirrors the command
@@ -348,88 +353,51 @@ class ModemManager:
             if not self._serial or not self._serial.is_open:
                 raise ModemError("Serial port not open")
 
-            pdus = _build_sms_pdus(to, message)
             self._serial.flushInput()
 
-            # Switch to PDU mode for the entire send operation
-            _log("[modem] >> AT+CMGF=0")
-            self._serial.write(b"AT+CMGF=0\r\n")
+            # Step 1: send destination number, wait for > prompt
+            _log(f"[modem] >> AT+CMGS=\"{to}\"")
+            self._serial.write(f'AT+CMGS="{to}"\r'.encode())
+
+            prompt_buf = b""
+            deadline = time.time() + 5.0
+            while time.time() < deadline:
+                chunk = self._serial.read(max(self._serial.in_waiting, 1))
+                if chunk:
+                    prompt_buf += chunk
+                    if b">" in prompt_buf:
+                        break
+
+            if b">" not in prompt_buf:
+                raise ModemError(f"No > prompt from modem (got: {prompt_buf!r})")
+            _log(f"[modem] << {prompt_buf!r}")
+
+            # Step 2: send message body encoded as Latin-1 + Ctrl+Z
+            # AT+CSCS="8859-1" set at init — modem maps Latin-1 bytes to GSM-7.
+            # Characters outside Latin-1 are replaced with '?'.
+            body = message.encode("latin-1", errors="replace")
+            _log(f"[modem] >> {body!r}<CTRL+Z>")
+            self._serial.write(body + b"\x1a")
+
+            # Step 3: wait for +CMGS confirmation (network can be slow)
+            deadline = time.time() + 30.0
             buf = b""
-            deadline = time.time() + self._timeout
             while time.time() < deadline:
                 chunk = self._serial.read(max(self._serial.in_waiting, 1))
                 if chunk:
                     buf += chunk
-                    if b"OK" in buf or b"ERROR" in buf:
+                    decoded = buf.decode("latin-1")
+                    if "+CMGS:" in decoded or "ERROR" in decoded:
                         break
-            if b"OK" not in buf:
-                raise ModemError(
-                    f"AT+CMGF=0 failed: {buf.decode('utf-8', errors='replace').strip()!r}"
-                )
 
-            last_ref = 0
-            try:
-                for pdu in pdus:
-                    # SIM7600E counts the leading SMSC byte in AT+CMGS length
-                    pdu_len = len(pdu)
-                    pdu_hex = pdu.hex().upper()
+            response = buf.decode("latin-1")
+            _log(f"[modem] << (send result) {response!r}")
 
-                    self._serial.flushInput()
-                    _log(f"[modem] >> AT+CMGS={pdu_len}")
-                    self._serial.write(f"AT+CMGS={pdu_len}\r".encode())
+            if "ERROR" in response and "+CMGS:" not in response:
+                raise ModemError(response.strip())
 
-                    # Wait for > prompt
-                    prompt_buf = b""
-                    deadline = time.time() + 5.0
-                    while time.time() < deadline:
-                        chunk = self._serial.read(max(self._serial.in_waiting, 1))
-                        if chunk:
-                            prompt_buf += chunk
-                            if b">" in prompt_buf:
-                                break
-                    if b">" not in prompt_buf:
-                        raise ModemError(f"No > prompt from modem (got: {prompt_buf!r})")
-                    _log(f"[modem] << {prompt_buf!r}")
-
-                    # Send PDU hex + Ctrl+Z
-                    _log(f"[modem] >> {pdu_hex}<CTRL+Z>")
-                    self._serial.write(pdu_hex.encode() + b"\x1a")
-
-                    # Wait for +CMGS confirmation (network can be slow)
-                    buf = b""
-                    deadline = time.time() + 30.0
-                    while time.time() < deadline:
-                        chunk = self._serial.read(max(self._serial.in_waiting, 1))
-                        if chunk:
-                            buf += chunk
-                            decoded = buf.decode("utf-8", errors="replace")
-                            if "+CMGS:" in decoded or "ERROR" in decoded:
-                                break
-
-                    response = buf.decode("utf-8", errors="replace")
-                    _log(f"[modem] << (send result) {response!r}")
-
-                    if "ERROR" in response and "+CMGS:" not in response:
-                        raise ModemError(response.strip())
-
-                    m = _CMGS_RE.search(response)
-                    if m:
-                        last_ref = int(m.group(1))
-
-            finally:
-                # Always restore text mode so list/read/delete keep working
-                _log("[modem] >> AT+CMGF=1")
-                self._serial.write(b"AT+CMGF=1\r\n")
-                restore_buf = b""
-                deadline = time.time() + self._timeout
-                while time.time() < deadline:
-                    chunk = self._serial.read(max(self._serial.in_waiting, 1))
-                    if chunk:
-                        restore_buf += chunk
-                        if b"OK" in restore_buf or b"ERROR" in restore_buf:
-                            break
-
-            return last_ref
+            m = _CMGS_RE.search(response)
+            return int(m.group(1)) if m else 0
 
     def list_sms(self, status_filter: str = "ALL") -> list[dict]:
         resp = self._send_command('AT+CMGL="ALL"', extra_timeout=5.0)
