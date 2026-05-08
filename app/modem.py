@@ -370,8 +370,8 @@ class ModemManager:
             last_ref = 0
             try:
                 for pdu in pdus:
-                    # AT+CMGS length excludes the leading SMSC byte (always 0x00 here)
-                    pdu_len = len(pdu) - 1
+                    # SIM7600E counts the leading SMSC byte in AT+CMGS length
+                    pdu_len = len(pdu)
                     pdu_hex = pdu.hex().upper()
 
                     self._serial.flushInput()
