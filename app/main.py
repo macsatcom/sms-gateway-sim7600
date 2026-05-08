@@ -170,9 +170,9 @@ def send_sms(request: Request, req: SmsSendRequest, _: str = Depends(require_api
     """
     Send an SMS message to the given number.
 
-    Western European characters including Danish ÆØÅæøå are fully supported.
-    Characters outside ISO 8859-1 (e.g. emoji) are replaced with '?'.
-    Long messages are automatically split by the modem.
+    Full Unicode is supported including Danish ÆØÅæøå and emoji.
+    Messages are encoded as UCS-2 (UTF-16); the modem auto-splits
+    long messages at 70 characters per segment.
     """
     request.state.recipient = req.to
     try:

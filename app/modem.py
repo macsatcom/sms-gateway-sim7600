@@ -209,10 +209,11 @@ class ModemManager:
         if "OK" not in resp:
             raise ModemError(f"AT+CMGF=1 failed: {resp!r}")
 
-        # Latin-1 charset — covers all Danish/Western European chars (Æ Ø Å æ ø å)
-        resp = self._send_command('AT+CSCS="8859-1"')
+        # UCS-2 charset: message text is sent/received as UTF-16 BE hex strings.
+        # Handles all Unicode including Danish ÆØÅæøå, emoji, etc.
+        resp = self._send_command('AT+CSCS="UCS2"')
         if "OK" not in resp:
-            print(f"[modem] WARNING: AT+CSCS=\"8859-1\" failed: {resp!r}", flush=True)
+            raise ModemError(f'AT+CSCS="UCS2" failed: {resp!r}')
 
         # Select SIM storage
         resp = self._send_command('AT+CPMS="SM","SM","SM"')
@@ -372,12 +373,12 @@ class ModemManager:
                 raise ModemError(f"No > prompt from modem (got: {prompt_buf!r})")
             _log(f"[modem] << {prompt_buf!r}")
 
-            # Step 2: send message body encoded as Latin-1 + Ctrl+Z
-            # AT+CSCS="8859-1" set at init — modem maps Latin-1 bytes to GSM-7.
-            # Characters outside Latin-1 are replaced with '?'.
-            body = message.encode("latin-1", errors="replace")
-            _log(f"[modem] >> {body!r}<CTRL+Z>")
-            self._serial.write(body + b"\x1a")
+            # Step 2: send message as UTF-16 BE hex + Ctrl+Z
+            # AT+CSCS="UCS2" is set at init — modem expects the body as a hex
+            # string of UCS-2 (UTF-16 BE) encoded characters.
+            body_hex = message.encode("utf-16-be").hex().upper().encode()
+            _log(f"[modem] >> <UCS2 hex, {len(message)} chars><CTRL+Z>")
+            self._serial.write(body_hex + b"\x1a")
 
             # Step 3: wait for +CMGS confirmation (network can be slow)
             deadline = time.time() + 30.0
@@ -399,6 +400,18 @@ class ModemManager:
             m = _CMGS_RE.search(response)
             return int(m.group(1)) if m else 0
 
+    @staticmethod
+    def _decode_body(raw: str) -> str:
+        """Decode a UCS-2 hex body line to a Python string.
+        Falls back to returning the raw string if it is not valid hex."""
+        s = raw.strip()
+        if len(s) >= 4 and len(s) % 4 == 0 and all(c in "0123456789ABCDEFabcdef" for c in s):
+            try:
+                return bytes.fromhex(s).decode("utf-16-be")
+            except (ValueError, UnicodeDecodeError):
+                pass
+        return s
+
     def list_sms(self, status_filter: str = "ALL") -> list[dict]:
         resp = self._send_command('AT+CMGL="ALL"', extra_timeout=5.0)
 
@@ -408,7 +421,8 @@ class ModemManager:
 
         def _flush():
             if current is not None:
-                current["message"] = "\n".join(body_lines).strip()
+                raw = "\n".join(body_lines).strip()
+                current["message"] = self._decode_body(raw)
                 messages.append(current)
 
         for line in resp.splitlines():
@@ -456,7 +470,7 @@ class ModemManager:
             "status":    m.group(1),
             "sender":    m.group(2),
             "timestamp": m.group(3),
-            "message":   "\n".join(body_lines).strip(),
+            "message":   self._decode_body("\n".join(body_lines).strip()),
         }
 
     def delete_sms(self, index: int) -> None:
