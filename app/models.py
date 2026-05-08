@@ -2,15 +2,25 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SmsSendRequest(BaseModel):
-    to: str
+    to: list[str]
     message: str
 
+    @field_validator("to", mode="before")
+    @classmethod
+    def parse_recipients(cls, v: object) -> list[str]:
+        if isinstance(v, str):
+            return [n.strip() for n in v.split(",") if n.strip()]
+        return v
+
     model_config = ConfigDict(json_schema_extra={
-        "example": {"to": "+4512345678", "message": "Hello from SIM7600!"}
+        "example": {
+            "to": "+4512345678",
+            "message": "Hello from SIM7600!",
+        }
     })
 
 
@@ -44,9 +54,16 @@ class SmsListResponse(BaseModel):
     count: int
 
 
-class SmsSendResponse(BaseModel):
+class SmsSendResult(BaseModel):
+    to: str
     ok: bool
-    message_reference: Optional[int]
+    message_reference: Optional[int] = None
+    error: Optional[str] = None
+
+
+class SmsSendResponse(BaseModel):
+    ok: bool                    # True only if every recipient succeeded
+    results: list[SmsSendResult]
 
 
 class DeleteResponse(BaseModel):

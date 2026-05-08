@@ -25,6 +25,7 @@ from models import (
     SmsMessage,
     SmsSendRequest,
     SmsSendResponse,
+    SmsSendResult,
     StatusResponse,
     TokenStats,
     TokenStatsResponse,
@@ -168,18 +169,29 @@ def submit_pin(req: PinRequest):
 )
 def send_sms(request: Request, req: SmsSendRequest, _: str = Depends(require_api_key)):
     """
-    Send an SMS message to the given number.
+    Send an SMS to one or more recipients.
+
+    `to` accepts a single number, a comma-separated string, or a JSON array:
+    - `"+4512345678"`
+    - `"+4512345678,+4687654321"`
+    - `["+4512345678", "+4687654321"]`
 
     Full Unicode is supported including Danish ÆØÅæøå and emoji.
-    Messages are encoded as UCS-2 (UTF-16); the modem auto-splits
-    long messages at 70 characters per segment.
+    Messages are encoded as UCS-2; the modem auto-splits long messages
+    at 70 characters per segment.
+
+    Returns a result entry per recipient. Top-level `ok` is true only
+    if every send succeeded.
     """
-    request.state.recipient = req.to
-    try:
-        mr = state.modem.send_sms(req.to, req.message)
-        return {"ok": True, "message_reference": mr}
-    except ModemError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    request.state.recipient = ",".join(req.to)
+    results: list[SmsSendResult] = []
+    for number in req.to:
+        try:
+            mr = state.modem.send_sms(number, req.message)
+            results.append(SmsSendResult(to=number, ok=True, message_reference=mr))
+        except ModemError as e:
+            results.append(SmsSendResult(to=number, ok=False, error=str(e)))
+    return SmsSendResponse(ok=all(r.ok for r in results), results=results)
 
 
 @app.get(

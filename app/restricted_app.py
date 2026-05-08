@@ -6,7 +6,7 @@ import state
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from modem import ModemError
-from models import HealthResponse, SmsSendRequest, SmsSendResponse, StatusResponse
+from models import HealthResponse, SmsSendRequest, SmsSendResponse, SmsSendResult, StatusResponse
 
 app = FastAPI(
     title="SMS Gateway — Restricted API",
@@ -79,14 +79,17 @@ def get_status():
 )
 def send_sms(request: Request, req: SmsSendRequest, _: str = Depends(state.require_api_key)):
     """
-    Send an SMS message to the given number.
+    Send an SMS to one or more recipients.
 
-    Messages longer than 160 characters are automatically split into multiple
-    parts by the modem (concatenated SMS / long SMS).
+    `to` accepts a single number, a comma-separated string, or a JSON array.
+    Returns a result entry per recipient.
     """
-    request.state.recipient = req.to
-    try:
-        mr = state.modem.send_sms(req.to, req.message)
-        return {"ok": True, "message_reference": mr}
-    except ModemError as e:
-        raise HTTPException(status_code=502, detail=str(e))
+    request.state.recipient = ",".join(req.to)
+    results: list[SmsSendResult] = []
+    for number in req.to:
+        try:
+            mr = state.modem.send_sms(number, req.message)
+            results.append(SmsSendResult(to=number, ok=True, message_reference=mr))
+        except ModemError as e:
+            results.append(SmsSendResult(to=number, ok=False, error=str(e)))
+    return SmsSendResponse(ok=all(r.ok for r in results), results=results)
