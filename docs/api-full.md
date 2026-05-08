@@ -174,13 +174,20 @@ curl -X POST http://localhost:8000/sim/pin \
 
 #### `POST /sms/send`
 
-Send an SMS message.
+Send an SMS message to one or more recipients.
 
 ```bash
+# Single recipient
 curl -X POST http://localhost:8000/sms/send \
   -H "X-API-Key: $KEY" \
   -H "Content-Type: application/json" \
   -d '{"to": "+4512345678", "message": "Hello!"}'
+
+# Multiple recipients (JSON array)
+curl -X POST http://localhost:8000/sms/send \
+  -H "X-API-Key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"to": ["+4512345678", "+4687654321"], "message": "Hello all!"}'
 ```
 
 **Request body:**
@@ -194,21 +201,33 @@ curl -X POST http://localhost:8000/sms/send \
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `to` | string | Recipient phone number in international format (`+45...`) |
-| `message` | string | Message text. Longer than 160 characters is automatically split by the modem (concatenated/long SMS) |
+| `to` | string \| array | Recipient(s) in international format. Accepts: `"+4512345678"`, `"+4512345678,+4687654321"`, or `["+4512345678", "+4687654321"]` |
+| `message` | string | Message text. Full Unicode supported (ÆØÅæøå, emoji). Long messages are auto-split at 70 chars/segment (UCS-2) |
 
 **Response `202`:**
 
 ```json
 {
   "ok": true,
-  "message_reference": 42
+  "results": [
+    {
+      "to": "+4512345678",
+      "ok": true,
+      "message_reference": 42,
+      "error": null
+    }
+  ]
 }
 ```
 
-`message_reference` is the modem-assigned delivery reference number (`null` if unavailable).
+Top-level `ok` is `true` only if **all** recipients succeeded. Each entry in `results` contains:
 
-**Response `502`** — modem failed to send (no signal, SIM issue, etc.).
+| Field | Description |
+|-------|-------------|
+| `to` | The recipient number |
+| `ok` | Whether this individual send succeeded |
+| `message_reference` | Modem-assigned delivery reference (`null` if unavailable) |
+| `error` | Error message if `ok` is `false`, otherwise `null` |
 
 ---
 
@@ -314,6 +333,40 @@ curl -X DELETE -H "X-API-Key: $KEY" http://localhost:8000/sms
   "deleted": "all"
 }
 ```
+
+---
+
+#### `GET /sms/stream`
+
+Open a persistent Server-Sent Events (SSE) connection. Each incoming SMS is pushed
+as a JSON `data` event in real time.
+
+Requires `MONITOR_PORT` to be configured (default `/dev/ttyUSB7`). The monitor listens
+for `+CMTI` URCs on the secondary AT port and fetches the full message via the main port.
+
+```bash
+curl -N -H "X-API-Key: $KEY" http://localhost:8000/sms/stream
+```
+
+**Event format:**
+
+```
+data: {"index": 3, "sender": "+4512345678", "message": "Hello!", "timestamp": "26/05/08,10:30:00+08", "status": "REC UNREAD"}
+
+: keepalive
+```
+
+A `: keepalive` comment is sent every 15 seconds to prevent the connection from timing out.
+
+| Event field | Description |
+|-------------|-------------|
+| `index` | SIM storage index of the received message |
+| `sender` | Sender phone number |
+| `message` | Decoded message text |
+| `timestamp` | Modem timestamp string (`YY/MM/DD,HH:MM:SS+tz`) |
+| `status` | Always `"REC UNREAD"` for freshly received messages |
+
+**Response `503`** — `MONITOR_PORT` is not configured or monitor failed to start.
 
 ---
 
@@ -622,6 +675,7 @@ All settings live in `docker/.env` (copy from `docker/.env.example`).
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEM_PORT` | `/dev/ttyUSB2` | Serial device for AT commands |
+| `MONITOR_PORT` | `/dev/ttyUSB7` | Secondary AT port for incoming SMS monitoring (`GET /sms/stream`) |
 | `BAUD_RATE` | `115200` | Serial baud rate |
 | `CMD_TIMEOUT` | `5.0` | Seconds to wait per AT command. Increase to `30.0` for slow carriers |
 | `API_PORT` | `8000` | Port for the full API |
