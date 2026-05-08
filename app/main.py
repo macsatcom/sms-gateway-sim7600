@@ -1,15 +1,18 @@
 from __future__ import annotations
 
+import asyncio
+import json
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 import state
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from state import TOKENS, request_logger, require_api_key
 
-from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, ModemError, ModemManager
+from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, MONITOR_PORT, ModemError, ModemManager
+from monitor import SmsMonitor
 from models import (
     AtCommandResponse,
     DeleteResponse,
@@ -41,6 +44,11 @@ async def lifespan(app: FastAPI):
         print(f"[sms-gateway] Modem initialised on {MODEM_PORT}")
     except Exception as e:
         print(f"[sms-gateway] WARNING: Modem init failed: {e}")
+
+    if MONITOR_PORT:
+        state.sms_monitor = SmsMonitor(MONITOR_PORT, BAUD_RATE)
+        state.sms_monitor.start(asyncio.get_event_loop(), state.modem.read_sms)
+
     yield
     if state.modem._serial and state.modem._serial.is_open:
         state.modem._serial.close()
@@ -218,6 +226,50 @@ def list_sms(
         return {"messages": messages, "count": len(messages)}
     except ModemError as e:
         raise HTTPException(status_code=503, detail=str(e))
+
+
+@app.get(
+    "/sms/stream",
+    tags=["SMS"],
+    summary="Stream incoming SMS via Server-Sent Events",
+    dependencies=[Depends(require_api_key)],
+)
+async def sms_stream(request: Request):
+    """
+    Open a persistent SSE connection. Each incoming SMS is pushed as a JSON data event.
+
+    Event format:
+    ```
+    data: {"index": 3, "sender": "+4512345678", "message": "Hello", "timestamp": "26/05/08,10:30:00+08", "status": "REC UNREAD"}
+    ```
+
+    A `: keepalive` comment is sent every 15 seconds to keep the connection alive.
+    Requires `MONITOR_PORT` to be configured (default `/dev/ttyUSB7`).
+    """
+    if state.sms_monitor is None:
+        raise HTTPException(status_code=503, detail="SMS monitor not running — set MONITOR_PORT in config")
+
+    q = state.sms_monitor.subscribe()
+
+    async def event_stream():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=15.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+        finally:
+            state.sms_monitor.unsubscribe(q)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get(

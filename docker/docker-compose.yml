@@ -5,6 +5,7 @@ services:
       dockerfile: docker/Dockerfile
     devices:
       - ${MODEM_PORT:-/dev/ttyUSB2}
+      - ${MONITOR_PORT:-/dev/ttyUSB7}
     ports:
       - "${API_PORT:-8000}:${API_PORT:-8000}"
       - "${RESTRICTED_PORT:-8007}:${RESTRICTED_PORT:-8007}"

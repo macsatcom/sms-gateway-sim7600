@@ -37,6 +37,7 @@ Both apps run in the same asyncio event loop (`server.py`) sharing one serial po
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MODEM_PORT` | `/dev/ttyUSB2` | Serial device for AT commands |
+| `MONITOR_PORT` | `/dev/ttyUSB7` | Secondary AT port for incoming SMS monitoring |
 | `BAUD_RATE` | `115200` | Serial baud rate |
 | `CMD_TIMEOUT` | `5.0` | Seconds to wait per AT command |
 | `API_PORT` | `8000` | Full API HTTP port |
@@ -80,6 +81,7 @@ All endpoints except `GET /health` require `X-API-Key: <token>` header.
 | POST | `/sim/pin` | Submit PIN to unlock SIM |
 | POST | `/sms/send` | Send SMS (single or multiple recipients) |
 | GET | `/sms` | List stored SMS (`?status=REC UNREAD` optional) |
+| GET | `/sms/stream` | SSE stream — push event for each incoming SMS |
 | GET | `/sms/{index}` | Read one SMS by SIM storage index |
 | DELETE | `/sms/{index}` | Delete one SMS by index |
 | DELETE | `/sms` | Delete all SMS from SIM storage |
@@ -157,6 +159,9 @@ curl -X DELETE -H "X-API-Key: $KEY" http://localhost:8000/sms/1
 # Delete all messages
 curl -X DELETE -H "X-API-Key: $KEY" http://localhost:8000/sms
 
+# Stream incoming SMS (Server-Sent Events)
+curl -N -H "X-API-Key: $KEY" http://localhost:8000/sms/stream
+
 # GPS
 curl -H "X-API-Key: $KEY" -X POST http://localhost:8000/gps/start
 curl -H "X-API-Key: $KEY" http://localhost:8000/gps/location
@@ -186,6 +191,21 @@ done
 ```
 
 Or use `GET /debug/ports` after the gateway is running.
+
+## Incoming SMS monitoring
+
+The gateway opens `MONITOR_PORT` (default `ttyUSB7`) as a dedicated listen-only AT session.
+It sets `AT+CNMI=2,1,0,0,0` on startup so the modem sends `+CMTI: "SM",<index>` URCs to that
+port whenever an SMS arrives. The monitor reads the message via the main `MODEM_PORT` session
+and broadcasts it to all connected SSE clients.
+
+`GET /sms/stream` returns `text/event-stream`. Each event is a JSON object:
+
+```
+data: {"index": 3, "sender": "+4512345678", "message": "Hello!", "timestamp": "26/05/08,10:30:00+08", "status": "REC UNREAD"}
+```
+
+See `docs/ha-integration.md` for a complete Home Assistant integration guide.
 
 ## AT Commands Reference
 

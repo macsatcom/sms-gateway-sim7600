@@ -9,11 +9,12 @@ from typing import Optional
 import serial
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-MODEM_PORT  = os.environ.get("MODEM_PORT",  "/dev/ttyUSB2")
-BAUD_RATE   = int(os.environ.get("BAUD_RATE", "115200"))
-CMD_TIMEOUT = float(os.environ.get("CMD_TIMEOUT", "5.0"))
-SIM_PIN      = os.environ.get("SIM_PIN", "")
-DEBUG        = os.environ.get("DEBUG", "0").lower() in ("1", "true", "yes")
+MODEM_PORT    = os.environ.get("MODEM_PORT",    "/dev/ttyUSB2")
+MONITOR_PORT  = os.environ.get("MONITOR_PORT", "/dev/ttyUSB7")
+BAUD_RATE     = int(os.environ.get("BAUD_RATE", "115200"))
+CMD_TIMEOUT   = float(os.environ.get("CMD_TIMEOUT", "5.0"))
+SIM_PIN       = os.environ.get("SIM_PIN", "")
+DEBUG         = os.environ.get("DEBUG", "0").lower() in ("1", "true", "yes")
 GPS_AUTOSTART = os.environ.get("GPS_AUTOSTART", "0").lower() in ("1", "true", "yes")
 
 

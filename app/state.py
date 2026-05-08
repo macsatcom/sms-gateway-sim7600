@@ -7,11 +7,11 @@ from fastapi import Header, HTTPException, Request
 
 from logger import DB_PATH, RequestLogger
 from modem import ModemManager
+from monitor import SmsMonitor
 
-# Shared modem instance — set by main.py lifespan, read by both apps.
-# Both FastAPI apps run in the same asyncio event loop (server.py), so this
-# module is loaded once and the reference is shared safely.
+# Shared instances — set by main.py lifespan, read by both apps.
 modem: Optional[ModemManager] = None
+sms_monitor: Optional[SmsMonitor] = None
 
 # ── Auth ───────────────────────────────────────────────────────────────────────
 
