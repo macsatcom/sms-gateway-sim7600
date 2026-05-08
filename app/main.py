@@ -170,8 +170,10 @@ def send_sms(request: Request, req: SmsSendRequest, _: str = Depends(require_api
     """
     Send an SMS message to the given number.
 
-    Messages longer than 160 characters are automatically split into multiple
-    parts by the modem (concatenated SMS / long SMS).
+    Full Unicode is supported, including Danish ÆØÅæøå and emoji.
+    Messages are encoded as GSM-7 when possible (160 chars/segment) or
+    UCS-2 for non-GSM characters (70 chars/segment). Long messages are
+    automatically split into concatenated SMS parts.
     """
     request.state.recipient = req.to
     try:

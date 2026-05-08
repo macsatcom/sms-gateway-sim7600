@@ -34,6 +34,115 @@ _CCID_RE    = re.compile(r'["\s]?(\d{18,22})["\s]?')
 _CGPS_RE      = re.compile(r'\+CGPS:\s*(\d+),?(\d*)')
 _CGPSINFO_RE  = re.compile(r'\+CGPSINFO:\s*([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*),([^,]*)')
 
+# ── PDU helpers ───────────────────────────────────────────────────────────────
+
+_GSM7_TABLE: dict[str, int] = {
+    '@': 0,  '£': 1,  '$': 2,  '¥': 3,  'è': 4,  'é': 5,  'ù': 6,  'ì': 7,
+    'ò': 8,  'Ç': 9,  '\n': 10, 'Ø': 11, 'ø': 12, '\r': 13, 'Å': 14, 'å': 15,
+    'Δ': 16, '_': 17, 'Φ': 18, 'Γ': 19, 'Λ': 20, 'Ω': 21, 'Π': 22, 'Ψ': 23,
+    'Σ': 24, 'Θ': 25, 'Ξ': 26, 'Æ': 28, 'æ': 29, 'ß': 30, 'É': 31,
+    ' ': 32, '!': 33, '"': 34, '#': 35, '¤': 36, '%': 37, '&': 38, "'": 39,
+    '(': 40, ')': 41, '*': 42, '+': 43, ',': 44, '-': 45, '.': 46, '/': 47,
+    '0': 48, '1': 49, '2': 50, '3': 51, '4': 52, '5': 53, '6': 54, '7': 55,
+    '8': 56, '9': 57, ':': 58, ';': 59, '<': 60, '=': 61, '>': 62, '?': 63,
+    '¡': 64, 'A': 65, 'B': 66, 'C': 67, 'D': 68, 'E': 69, 'F': 70, 'G': 71,
+    'H': 72, 'I': 73, 'J': 74, 'K': 75, 'L': 76, 'M': 77, 'N': 78, 'O': 79,
+    'P': 80, 'Q': 81, 'R': 82, 'S': 83, 'T': 84, 'U': 85, 'V': 86, 'W': 87,
+    'X': 88, 'Y': 89, 'Z': 90, 'Ä': 91, 'Ö': 92, 'Ñ': 93, 'Ü': 94, '§': 95,
+    '¿': 96, 'a': 97, 'b': 98, 'c': 99, 'd': 100, 'e': 101, 'f': 102, 'g': 103,
+    'h': 104, 'i': 105, 'j': 106, 'k': 107, 'l': 108, 'm': 109, 'n': 110, 'o': 111,
+    'p': 112, 'q': 113, 'r': 114, 's': 115, 't': 116, 'u': 117, 'v': 118, 'w': 119,
+    'x': 120, 'y': 121, 'z': 122, 'ä': 123, 'ö': 124, 'ñ': 125, 'ü': 126, 'à': 127,
+}
+_GSM7_CHARS = frozenset(_GSM7_TABLE)
+
+
+def _pack_gsm7(text: str, fill_bits: int = 0) -> bytes:
+    """Pack text into GSM 7-bit septets. fill_bits zero-bits precede the first septet."""
+    out: list[int] = []
+    bits = 0
+    bit_count = fill_bits
+    for c in text:
+        bits |= (_GSM7_TABLE[c] & 0x7F) << bit_count
+        bit_count += 7
+        while bit_count >= 8:
+            out.append(bits & 0xFF)
+            bits >>= 8
+            bit_count -= 8
+    if bit_count > 0:
+        out.append(bits & 0xFF)
+    return bytes(out)
+
+
+def _encode_phone_pdu(number: str) -> tuple[int, int, bytes]:
+    """Encode a phone number as a PDU address field.
+    Returns (digit_count, type_of_address, semi-octet bytes).
+    """
+    is_intl = number.startswith('+')
+    digits  = ''.join(c for c in number if c.isdigit())
+    toa     = 0x91 if is_intl else 0x81
+    padded  = digits + ('F' if len(digits) % 2 else '')
+    addr    = bytes(
+        (int(padded[i + 1], 16) << 4) | int(padded[i], 16)
+        for i in range(0, len(padded), 2)
+    )
+    return len(digits), toa, addr
+
+
+def _build_sms_pdus(to: str, message: str) -> list[bytes]:
+    """Build one or more SMS-SUBMIT PDUs, splitting long messages as needed.
+
+    Uses GSM-7 encoding when all characters fit (includes Æ Ø Å æ ø å);
+    falls back to UCS-2 for any character outside the GSM-7 alphabet.
+    """
+    use_ucs2   = not all(c in _GSM7_CHARS for c in message)
+    max_single = 70  if use_ucs2 else 160
+    max_seg    = 67  if use_ucs2 else 153
+
+    segments = (
+        [message] if len(message) <= max_single
+        else [message[i:i + max_seg] for i in range(0, len(message), max_seg)]
+    )
+    total = len(segments)
+    ref   = int(time.time()) & 0xFF
+
+    digit_count, toa, addr_bytes = _encode_phone_pdu(to)
+    dest = bytes([digit_count, toa]) + addr_bytes
+
+    result: list[bytes] = []
+    for seq, seg in enumerate(segments, 1):
+        multi    = total > 1
+        udhi_bit = 0x40 if multi else 0x00
+
+        smsc  = b'\x00'             # use default SMSC from SIM
+        first = bytes([0x11 | udhi_bit])  # SMS-SUBMIT, no VP
+        mr    = b'\x00'
+        pid   = b'\x00'
+
+        if use_ucs2:
+            dcs = b'\x08'
+            if multi:
+                udh = bytes([0x05, 0x00, 0x03, ref, total, seq])
+                ud  = udh + seg.encode('utf-16-be')
+            else:
+                ud = seg.encode('utf-16-be')
+            udl = bytes([len(ud)])      # UCS-2 UDL is in octets
+        else:
+            dcs = b'\x00'
+            if multi:
+                # 6-byte UDH occupies 7 septets; 1 fill bit before packed message
+                udh = bytes([0x05, 0x00, 0x03, ref, total, seq])
+                ud  = udh + _pack_gsm7(seg, fill_bits=1)
+                udl = bytes([7 + len(seg)])  # 7 header septets + message chars
+            else:
+                ud  = _pack_gsm7(seg)
+                udl = bytes([len(seg)])      # GSM-7 UDL is in septets (chars)
+
+        result.append(smsc + first + mr + dest + pid + dcs + udl + ud)
+
+    return result
+
+
 _CREG_TEXT = {
     "0": "Not registered, not searching",
     "1": "Registered, home network",
@@ -239,50 +348,88 @@ class ModemManager:
             if not self._serial or not self._serial.is_open:
                 raise ModemError("Serial port not open")
 
+            pdus = _build_sms_pdus(to, message)
             self._serial.flushInput()
 
-            # Step 1: send phone number, wait for > prompt
-            _log(f"[modem] >> AT+CMGS=\"{to}\"")
-            self._serial.write(f'AT+CMGS="{to}"\r'.encode())
-
-            prompt_buf = b""
-            deadline = time.time() + 5.0
-            while time.time() < deadline:
-                # read() returns after 0.1s if nothing arrives (serial timeout)
-                chunk = self._serial.read(max(self._serial.in_waiting, 1))
-                if chunk:
-                    prompt_buf += chunk
-                    if b">" in prompt_buf:
-                        break
-
-            if b">" not in prompt_buf:
-                raise ModemError(
-                    f"No > prompt from modem (got: {prompt_buf!r})"
-                )
-            _log(f"[modem] << {prompt_buf!r}")
-
-            # Step 2: send message body + Ctrl+Z
-            self._serial.write(message.encode("utf-8", errors="replace") + b"\x1a")
-
-            # Step 3: wait for +CMGS confirmation (long — network can be slow)
-            deadline = time.time() + 30.0
+            # Switch to PDU mode for the entire send operation
+            _log("[modem] >> AT+CMGF=0")
+            self._serial.write(b"AT+CMGF=0\r\n")
             buf = b""
+            deadline = time.time() + self._timeout
             while time.time() < deadline:
                 chunk = self._serial.read(max(self._serial.in_waiting, 1))
                 if chunk:
                     buf += chunk
-                    decoded = buf.decode("utf-8", errors="replace")
-                    if "+CMGS:" in decoded or "ERROR" in decoded:
+                    if b"OK" in buf or b"ERROR" in buf:
                         break
+            if b"OK" not in buf:
+                raise ModemError(
+                    f"AT+CMGF=0 failed: {buf.decode('utf-8', errors='replace').strip()!r}"
+                )
 
-            response = buf.decode("utf-8", errors="replace")
-            _log(f"[modem] << (send result) {response!r}")
+            last_ref = 0
+            try:
+                for pdu in pdus:
+                    # AT+CMGS length excludes the leading SMSC byte (always 0x00 here)
+                    pdu_len = len(pdu) - 1
+                    pdu_hex = pdu.hex().upper()
 
-            if "ERROR" in response and "+CMGS:" not in response:
-                raise ModemError(response.strip())
+                    self._serial.flushInput()
+                    _log(f"[modem] >> AT+CMGS={pdu_len}")
+                    self._serial.write(f"AT+CMGS={pdu_len}\r".encode())
 
-            m = _CMGS_RE.search(response)
-            return int(m.group(1)) if m else 0
+                    # Wait for > prompt
+                    prompt_buf = b""
+                    deadline = time.time() + 5.0
+                    while time.time() < deadline:
+                        chunk = self._serial.read(max(self._serial.in_waiting, 1))
+                        if chunk:
+                            prompt_buf += chunk
+                            if b">" in prompt_buf:
+                                break
+                    if b">" not in prompt_buf:
+                        raise ModemError(f"No > prompt from modem (got: {prompt_buf!r})")
+                    _log(f"[modem] << {prompt_buf!r}")
+
+                    # Send PDU hex + Ctrl+Z
+                    _log(f"[modem] >> {pdu_hex}<CTRL+Z>")
+                    self._serial.write(pdu_hex.encode() + b"\x1a")
+
+                    # Wait for +CMGS confirmation (network can be slow)
+                    buf = b""
+                    deadline = time.time() + 30.0
+                    while time.time() < deadline:
+                        chunk = self._serial.read(max(self._serial.in_waiting, 1))
+                        if chunk:
+                            buf += chunk
+                            decoded = buf.decode("utf-8", errors="replace")
+                            if "+CMGS:" in decoded or "ERROR" in decoded:
+                                break
+
+                    response = buf.decode("utf-8", errors="replace")
+                    _log(f"[modem] << (send result) {response!r}")
+
+                    if "ERROR" in response and "+CMGS:" not in response:
+                        raise ModemError(response.strip())
+
+                    m = _CMGS_RE.search(response)
+                    if m:
+                        last_ref = int(m.group(1))
+
+            finally:
+                # Always restore text mode so list/read/delete keep working
+                _log("[modem] >> AT+CMGF=1")
+                self._serial.write(b"AT+CMGF=1\r\n")
+                restore_buf = b""
+                deadline = time.time() + self._timeout
+                while time.time() < deadline:
+                    chunk = self._serial.read(max(self._serial.in_waiting, 1))
+                    if chunk:
+                        restore_buf += chunk
+                        if b"OK" in restore_buf or b"ERROR" in restore_buf:
+                            break
+
+            return last_ref
 
     def list_sms(self, status_filter: str = "ALL") -> list[dict]:
         resp = self._send_command('AT+CMGL="ALL"', extra_timeout=5.0)
