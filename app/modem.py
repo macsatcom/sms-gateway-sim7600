@@ -356,9 +356,11 @@ class ModemManager:
 
             self._serial.flushInput()
 
-            # Step 1: send destination number, wait for > prompt
-            _log(f"[modem] >> AT+CMGS=\"{to}\"")
-            self._serial.write(f'AT+CMGS="{to}"\r'.encode())
+            # Step 1: send destination number as UCS-2 hex, wait for > prompt
+            # AT+CSCS="UCS2" requires the number string to be UTF-16 BE hex too.
+            to_hex = to.encode("utf-16-be").hex().upper()
+            _log(f"[modem] >> AT+CMGS=\"{to_hex}\" (UCS-2 of {to!r})")
+            self._serial.write(f'AT+CMGS="{to_hex}"\r'.encode())
 
             prompt_buf = b""
             deadline = time.time() + 5.0
