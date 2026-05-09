@@ -1,0 +1,724 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMS Gateway · Statistics</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg:       #060c18;
+  --surf:     #0c1728;
+  --surf2:    #101f35;
+  --bord:     #182d48;
+  --bord2:    #22406a;
+  --txt:      #cddaee;
+  --muted:    #4b6585;
+  --dim:      #1e3050;
+  --cyan:     #38bdf8;
+  --green:    #34d399;
+  --yellow:   #fbbf24;
+  --red:      #f87171;
+  --purple:   #a78bfa;
+  --orange:   #fb923c;
+  --teal:     #2dd4bf;
+  --pink:     #f472b6;
+}
+
+body {
+  font-family:'Syne',sans-serif;
+  background:var(--bg);
+  color:var(--txt);
+  min-height:100vh;
+  font-size:14px;
+}
+
+/* ── Auth overlay ──────────────────────────────── */
+#auth-overlay {
+  position:fixed;inset:0;
+  background:var(--bg);
+  display:flex;align-items:center;justify-content:center;
+  z-index:200;
+}
+.auth-box {
+  background:var(--surf);
+  border:1px solid var(--bord2);
+  border-radius:14px;
+  padding:2.5rem 2.25rem;
+  width:360px;max-width:90vw;
+}
+.auth-logo {
+  font-size:0.65rem;font-weight:600;letter-spacing:0.2em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:0.75rem;
+}
+.auth-box h2 {
+  font-size:1.5rem;font-weight:800;color:var(--txt);margin-bottom:0.4rem;
+}
+.auth-box h2 em { font-style:normal;color:var(--cyan); }
+.auth-box p { font-size:0.8rem;color:var(--muted);margin-bottom:1.75rem; }
+.auth-box input {
+  width:100%;
+  background:var(--surf2);border:1px solid var(--bord);border-radius:7px;
+  padding:0.7rem 1rem;
+  font-family:'JetBrains Mono',monospace;font-size:0.85rem;
+  color:var(--txt);outline:none;margin-bottom:0.9rem;
+  transition:border-color .2s;
+}
+.auth-box input:focus{border-color:var(--cyan);}
+.auth-box button {
+  width:100%;background:var(--cyan);color:#03111e;
+  border:none;border-radius:7px;padding:0.7rem;
+  font-family:'Syne',sans-serif;font-size:0.9rem;font-weight:700;
+  cursor:pointer;transition:opacity .2s;
+}
+.auth-box button:hover{opacity:.85;}
+#auth-err{color:var(--red);font-size:0.75rem;margin-top:.5rem;display:none;}
+
+/* ── Shell ─────────────────────────────────────── */
+.wrap { max-width:1440px;margin:0 auto;padding:1.75rem 2rem; }
+
+/* ── Header ───────────────────────────────────── */
+header {
+  display:flex;align-items:flex-start;justify-content:space-between;
+  margin-bottom:1.75rem;gap:1rem;flex-wrap:wrap;
+}
+.h-left h1 {
+  font-size:1.5rem;font-weight:800;letter-spacing:-.02em;
+}
+.h-left h1 b { color:var(--cyan);font-weight:800; }
+.h-meta {
+  font-family:'JetBrains Mono',monospace;font-size:0.7rem;
+  color:var(--muted);margin-top:.3rem;
+  display:flex;align-items:center;gap:.5rem;
+}
+.dot {
+  width:6px;height:6px;border-radius:50%;
+  background:var(--green);flex-shrink:0;
+  animation:blink 2.2s ease-in-out infinite;
+}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+.h-right { display:flex;align-items:center;gap:.6rem;flex-wrap:wrap; }
+
+.seg {
+  display:flex;
+  background:var(--surf);border:1px solid var(--bord);border-radius:8px;
+  overflow:hidden;
+}
+.seg button {
+  padding:.45rem .9rem;
+  font-family:'JetBrains Mono',monospace;font-size:.75rem;
+  color:var(--muted);background:none;border:none;cursor:pointer;
+  transition:all .15s;
+}
+.seg button:hover{color:var(--txt);background:var(--surf2);}
+.seg button.on{color:var(--cyan);background:var(--surf2);}
+
+.btn-ghost {
+  padding:.45rem .85rem;
+  font-family:'JetBrains Mono',monospace;font-size:.75rem;
+  color:var(--muted);background:var(--surf);
+  border:1px solid var(--bord);border-radius:8px;cursor:pointer;
+  transition:all .15s;white-space:nowrap;
+}
+.btn-ghost:hover{color:var(--txt);border-color:var(--bord2);}
+.btn-ghost.on{color:var(--green);border-color:var(--green);}
+.btn-danger{color:var(--red)!important;}
+.btn-danger:hover{border-color:var(--red)!important;}
+
+/* ── KPI row ──────────────────────────────────── */
+.kpi-row {
+  display:grid;grid-template-columns:repeat(4,1fr);gap:.9rem;
+  margin-bottom:1.25rem;
+}
+@media(max-width:900px){.kpi-row{grid-template-columns:repeat(2,1fr);}}
+@media(max-width:500px){.kpi-row{grid-template-columns:1fr;}}
+
+.kpi {
+  background:var(--surf);border:1px solid var(--bord);border-radius:10px;
+  padding:1.1rem 1.3rem;position:relative;overflow:hidden;
+}
+.kpi::after {
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:var(--kpi-c,var(--cyan));
+}
+.kpi.g{--kpi-c:var(--green);}
+.kpi.y{--kpi-c:var(--yellow);}
+.kpi.r{--kpi-c:var(--red);}
+.kpi.p{--kpi-c:var(--purple);}
+
+.kpi-lbl {
+  font-size:.62rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:.45rem;
+}
+.kpi-val {
+  font-family:'JetBrains Mono',monospace;
+  font-size:2rem;font-weight:600;line-height:1;color:var(--txt);
+}
+.kpi-sub {
+  font-family:'JetBrains Mono',monospace;font-size:.68rem;
+  color:var(--muted);margin-top:.35rem;
+}
+
+/* ── Panels ───────────────────────────────────── */
+.row2   { display:grid;gap:.9rem;margin-bottom:1.25rem; }
+.row2   { grid-template-columns:2fr 1fr; }
+.row3   { grid-template-columns:repeat(3,1fr); }
+.row-eq { grid-template-columns:1fr 1fr; }
+@media(max-width:1024px){
+  .row2,.row3,.row-eq{grid-template-columns:1fr;}
+}
+
+.panel {
+  background:var(--surf);border:1px solid var(--bord);border-radius:10px;
+  padding:1.1rem 1.3rem;
+}
+.panel-t {
+  font-size:.62rem;font-weight:600;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--muted);margin-bottom:.9rem;
+}
+
+.chart-wrap { position:relative; }
+
+/* ── Tables ───────────────────────────────────── */
+.tbl { width:100%;border-collapse:collapse; }
+.tbl th {
+  text-align:left;padding:.4rem .65rem;
+  font-size:.6rem;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);
+  border-bottom:1px solid var(--bord);font-family:'Syne',sans-serif;
+}
+.tbl td {
+  padding:.42rem .65rem;border-bottom:1px solid var(--dim);
+  font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--txt);
+}
+.tbl tr:last-child td{border-bottom:none;}
+.tbl tr:hover td{background:var(--surf2);}
+
+.num{text-align:right;color:var(--cyan);}
+.pct{text-align:right;color:var(--muted);font-size:.68rem;}
+
+.minibar-bg{height:3px;background:var(--dim);border-radius:2px;margin-top:4px;}
+.minibar-fill{height:100%;border-radius:2px;background:var(--cyan);transition:width .4s;}
+
+.scroll-box{overflow-x:auto;overflow-y:auto;}
+
+/* ── Badges ───────────────────────────────────── */
+.badge {
+  display:inline-block;padding:.1rem .45rem;border-radius:4px;
+  font-family:'JetBrains Mono',monospace;font-size:.65rem;font-weight:600;
+}
+.s2{background:rgba(52,211,153,.13);color:var(--green);}
+.s3{background:rgba(251,191,36,.13);color:var(--yellow);}
+.s4{background:rgba(248,113,113,.13);color:var(--red);}
+.s5{background:rgba(167,139,250,.13);color:var(--purple);}
+
+.m-GET    {background:rgba(56,189,248,.12);color:var(--cyan);}
+.m-POST   {background:rgba(52,211,153,.12);color:var(--green);}
+.m-DELETE {background:rgba(248,113,113,.12);color:var(--red);}
+.m-PUT    {background:rgba(251,191,36,.12);color:var(--yellow);}
+
+.a-full       {background:rgba(56,189,248,.12);color:var(--cyan);}
+.a-restricted {background:rgba(167,139,250,.12);color:var(--purple);}
+.a-unknown    {background:rgba(75,101,133,.12);color:var(--muted);}
+
+.tok-anon{color:var(--muted);font-style:italic;}
+.tok-named{color:var(--yellow);}
+
+.ep{
+  max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  display:inline-block;vertical-align:bottom;
+}
+
+/* ── Scrollbar ────────────────────────────────── */
+::-webkit-scrollbar{width:5px;height:5px;}
+::-webkit-scrollbar-track{background:var(--surf);}
+::-webkit-scrollbar-thumb{background:var(--bord2);border-radius:3px;}
+::-webkit-scrollbar-thumb:hover{background:var(--muted);}
+
+/* ── Spinner ──────────────────────────────────── */
+.spinner {
+  display:flex;align-items:center;justify-content:center;
+  padding:4rem;color:var(--muted);
+  font-family:'JetBrains Mono',monospace;font-size:.8rem;
+  flex-direction:column;gap:1rem;
+}
+.spinner-ring {
+  width:32px;height:32px;border-radius:50%;
+  border:2px solid var(--bord2);border-top-color:var(--cyan);
+  animation:spin .7s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ── Separator ────────────────────────────────── */
+.sep{height:1px;background:var(--bord);margin:0 0 1.25rem;}
+</style>
+</head>
+<body>
+
+<!-- ── Auth ──────────────────────────────────────── -->
+<div id="auth-overlay">
+  <div class="auth-box">
+    <div class="auth-logo">SMS Gateway · SIM7600E</div>
+    <h2>Gateway <em>Statistics</em></h2>
+    <p>Authenticate with your API key to access the dashboard.</p>
+    <input type="password" id="key-input" placeholder="X-API-Key" autocomplete="off" spellcheck="false">
+    <button onclick="submitKey()">Open Dashboard</button>
+    <div id="auth-err">Invalid API key — check credentials and try again.</div>
+  </div>
+</div>
+
+<!-- ── Dashboard ─────────────────────────────────── -->
+<div class="wrap" id="dash" style="display:none">
+
+  <header>
+    <div class="h-left">
+      <h1>Gateway <b>Statistics</b></h1>
+      <div class="h-meta">
+        <span class="dot" id="live-dot"></span>
+        <span id="last-upd">—</span>
+        <span>·</span>
+        <span>sms-gateway.db</span>
+      </div>
+    </div>
+    <div class="h-right">
+      <div class="seg" id="range-seg">
+        <button data-r="24h" onclick="setRange('24h')">24h</button>
+        <button data-r="7d"  onclick="setRange('7d')" class="on">7d</button>
+        <button data-r="30d" onclick="setRange('30d')">30d</button>
+        <button data-r="all" onclick="setRange('all')">all</button>
+      </div>
+      <button class="btn-ghost on" id="ar-btn" onclick="toggleAR()">↺ auto</button>
+      <button class="btn-ghost" onclick="loadAll()">↺ refresh</button>
+      <button class="btn-ghost btn-danger" onclick="signOut()">sign out</button>
+    </div>
+  </header>
+
+  <div id="main-content">
+    <div class="spinner"><div class="spinner-ring"></div>Loading…</div>
+  </div>
+
+</div>
+
+<script>
+/* ── State ──────────────────────────────────────── */
+let apiKey  = sessionStorage.getItem('sgw_key') || '';
+let range   = '7d';
+let autoRef = true;
+let timer   = null;
+let charts  = {};
+
+/* ── Auth ───────────────────────────────────────── */
+function submitKey() {
+  apiKey = document.getElementById('key-input').value.trim();
+  if (!apiKey) return;
+  sessionStorage.setItem('sgw_key', apiKey);
+  tryLoad();
+}
+document.getElementById('key-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') submitKey();
+});
+
+function signOut() {
+  sessionStorage.removeItem('sgw_key');
+  apiKey = '';
+  stopAR();
+  document.getElementById('dash').style.display = 'none';
+  document.getElementById('auth-overlay').style.display = 'flex';
+  document.getElementById('key-input').value = '';
+}
+
+async function tryLoad() {
+  const r = await fetch(`/api/stats?range=${range}`, { headers: { 'X-API-Key': apiKey } });
+  if (r.status === 401) {
+    document.getElementById('auth-err').style.display = 'block';
+    return;
+  }
+  document.getElementById('auth-overlay').style.display = 'none';
+  document.getElementById('dash').style.display = 'block';
+  const stats = await r.json();
+  const logs  = await fetchLogs();
+  render(stats, logs);
+  startAR();
+}
+
+/* ── Fetch ──────────────────────────────────────── */
+async function fetchStats() {
+  const r = await fetch(`/api/stats?range=${range}`, { headers: { 'X-API-Key': apiKey } });
+  return r.ok ? r.json() : null;
+}
+async function fetchLogs() {
+  const r = await fetch('/logs?limit=50', { headers: { 'X-API-Key': apiKey } });
+  return r.ok ? r.json() : { entries: [] };
+}
+async function loadAll() {
+  const [stats, logs] = await Promise.all([fetchStats(), fetchLogs()]);
+  if (stats) render(stats, logs || { entries: [] });
+}
+
+/* ── Range ──────────────────────────────────────── */
+function setRange(r) {
+  range = r;
+  document.querySelectorAll('#range-seg button').forEach(b => {
+    b.classList.toggle('on', b.dataset.r === r);
+  });
+  loadAll();
+}
+
+/* ── Auto-refresh ───────────────────────────────── */
+function startAR() { if (autoRef) timer = setInterval(loadAll, 60000); }
+function stopAR()  { clearInterval(timer); timer = null; }
+function toggleAR() {
+  autoRef = !autoRef;
+  document.getElementById('ar-btn').classList.toggle('on', autoRef);
+  autoRef ? startAR() : stopAR();
+}
+
+/* ── Helpers ────────────────────────────────────── */
+function N(n) { return n == null ? '—' : Number(n).toLocaleString(); }
+
+function sc(code) {
+  if (code < 300) return 's2';
+  if (code < 400) return 's3';
+  if (code < 500) return 's4';
+  return 's5';
+}
+function ac(api) {
+  if (api === 'full')       return 'a-full';
+  if (api === 'restricted') return 'a-restricted';
+  return 'a-unknown';
+}
+function mc(m) { return 'm-' + m; }
+function tok(name) {
+  return name === 'anonymous'
+    ? `<span class="tok-anon">anonymous</span>`
+    : `<span class="tok-named">${esc(name)}</span>`;
+}
+function ep(path) {
+  const s = path.length > 55 ? path.slice(0, 55) + '…' : path;
+  return `<span class="ep" title="${esc(path)}">${esc(s)}</span>`;
+}
+function esc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ── Render ─────────────────────────────────────── */
+function render(s, logs) {
+  document.getElementById('last-upd').textContent =
+    'updated ' + new Date().toLocaleTimeString();
+
+  const errRate = s.total_requests
+    ? (s.error_count / s.total_requests * 100).toFixed(1) : '0.0';
+  const errClass = parseFloat(errRate) > 10 ? 'r' : 'y';
+
+  document.getElementById('main-content').innerHTML = `
+
+    <!-- KPIs -->
+    <div class="kpi-row">
+      <div class="kpi">
+        <div class="kpi-lbl">Total Requests</div>
+        <div class="kpi-val">${N(s.total_requests)}</div>
+        <div class="kpi-sub">range: ${s.range}</div>
+      </div>
+      <div class="kpi g">
+        <div class="kpi-lbl">SMS Sent</div>
+        <div class="kpi-val">${N(s.sms_sent)}</div>
+        <div class="kpi-sub">successful sends (202)</div>
+      </div>
+      <div class="kpi ${errClass}">
+        <div class="kpi-lbl">Error Rate</div>
+        <div class="kpi-val">${errRate}%</div>
+        <div class="kpi-sub">${N(s.error_count)} requests ≥ 400</div>
+      </div>
+      <div class="kpi p">
+        <div class="kpi-lbl">Unique IPs</div>
+        <div class="kpi-val">${N(s.unique_ips)}</div>
+        <div class="kpi-sub">distinct client addresses</div>
+      </div>
+    </div>
+
+    <!-- Row 1: daily + endpoints -->
+    <div class="row2">
+      <div class="panel">
+        <div class="panel-t">Requests per Day</div>
+        <div class="chart-wrap" style="height:220px">
+          <canvas id="c-daily"></canvas>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-t">Top Endpoints</div>
+        <div class="scroll-box" style="max-height:268px">
+          ${endpointTable(s.by_endpoint)}
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 2: api type + status + token -->
+    <div class="row2 row3">
+      <div class="panel">
+        <div class="panel-t">API Port</div>
+        <div class="chart-wrap" style="height:190px">
+          <canvas id="c-api"></canvas>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-t">HTTP Status Classes</div>
+        <div class="chart-wrap" style="height:190px">
+          <canvas id="c-status"></canvas>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-t">Token Usage</div>
+        <div class="chart-wrap" style="height:190px">
+          <canvas id="c-token"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Row 3: IPs + recipients -->
+    <div class="row2 row-eq">
+      <div class="panel">
+        <div class="panel-t">Top Client IPs</div>
+        <div class="scroll-box" style="max-height:280px">
+          ${ipTable(s.by_ip)}
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-t">SMS Recipients</div>
+        <div class="scroll-box" style="max-height:280px">
+          ${recipientTable(s.by_recipient)}
+        </div>
+      </div>
+    </div>
+
+    <div class="sep"></div>
+
+    <!-- Recent log -->
+    <div class="panel">
+      <div class="panel-t">Recent Requests — last 50</div>
+      <div class="scroll-box" style="max-height:420px">
+        ${logTable(logs.entries || [])}
+      </div>
+    </div>
+  `;
+
+  setTimeout(() => {
+    drawDaily(s.daily_requests, s.daily_sms);
+    drawApi(s.by_api);
+    drawStatus(s.by_status);
+    drawToken(s.by_token);
+  }, 0);
+}
+
+/* ── Table builders ─────────────────────────────── */
+function endpointTable(rows) {
+  if (!rows.length) return '<p style="color:var(--muted);padding:.5rem;font-size:.8rem">No data</p>';
+  const mx = rows[0].cnt;
+  return `<table class="tbl"><thead><tr><th>Endpoint</th><th>Count</th><th style="width:90px"></th></tr></thead><tbody>`
+    + rows.map(r => `<tr>
+        <td>${ep(r.endpoint)}</td>
+        <td class="num">${N(r.cnt)}</td>
+        <td><div class="minibar-bg"><div class="minibar-fill" style="width:${(r.cnt/mx*100).toFixed(1)}%"></div></div></td>
+      </tr>`).join('')
+    + `</tbody></table>`;
+}
+
+function ipTable(rows) {
+  const known = rows.filter(r => r.client_ip !== 'unknown');
+  const unkn  = rows.find(r => r.client_ip === 'unknown');
+  const mx    = rows[0]?.cnt || 1;
+  const all   = [...known, ...(unkn ? [unkn] : [])];
+  if (!all.length) return '<p style="color:var(--muted);padding:.5rem;font-size:.8rem">No IP data yet — will appear for new requests</p>';
+  return `<table class="tbl"><thead><tr><th>IP Address</th><th>Requests</th><th style="width:90px"></th></tr></thead><tbody>`
+    + all.map(r => `<tr>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:.75rem">${esc(r.client_ip)}</td>
+        <td class="num">${N(r.cnt)}</td>
+        <td><div class="minibar-bg"><div class="minibar-fill" style="width:${(r.cnt/mx*100).toFixed(1)}%;background:var(--purple)"></div></div></td>
+      </tr>`).join('')
+    + `</tbody></table>`;
+}
+
+function recipientTable(rows) {
+  if (!rows.length) return '<p style="color:var(--muted);padding:.5rem;font-size:.8rem">No SMS sends in this range</p>';
+  const mx = rows[0].cnt;
+  return `<table class="tbl"><thead><tr><th>Recipient</th><th>Sends</th><th style="width:90px"></th></tr></thead><tbody>`
+    + rows.map(r => `<tr>
+        <td style="font-family:'JetBrains Mono',monospace;font-size:.75rem">${esc(r.recipient)}</td>
+        <td class="num">${N(r.cnt)}</td>
+        <td><div class="minibar-bg"><div class="minibar-fill" style="width:${(r.cnt/mx*100).toFixed(1)}%;background:var(--green)"></div></div></td>
+      </tr>`).join('')
+    + `</tbody></table>`;
+}
+
+function logTable(entries) {
+  if (!entries.length) return '<p style="color:var(--muted);padding:.5rem;font-size:.8rem">No entries</p>';
+  const head = `<thead><tr>
+      <th>Timestamp</th><th>Method</th><th>Endpoint</th>
+      <th>Status</th><th>Token</th><th>API</th><th>Recipient</th><th>IP</th>
+    </tr></thead>`;
+  const body = entries.map(e => {
+    const code = e.status_code;
+    const api  = e.api || 'unknown';
+    return `<tr>
+      <td style="color:var(--muted);white-space:nowrap;font-size:.68rem">${esc(e.timestamp)}</td>
+      <td><span class="badge ${mc(e.method)}">${esc(e.method)}</span></td>
+      <td>${ep(e.endpoint)}</td>
+      <td><span class="badge ${sc(code)}">${code}</span></td>
+      <td>${tok(e.token_name)}</td>
+      <td><span class="badge ${ac(api)}">${esc(api)}</span></td>
+      <td style="color:var(--muted);white-space:nowrap">${e.recipient ? esc(e.recipient) : '—'}</td>
+      <td style="color:var(--muted);white-space:nowrap">${e.client_ip ? esc(e.client_ip) : '—'}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="tbl">${head}<tbody>${body}</tbody></table>`;
+}
+
+/* ── Chart.js defaults ──────────────────────────── */
+Chart.defaults.color          = '#4b6585';
+Chart.defaults.borderColor    = '#182d48';
+Chart.defaults.font.family    = "'JetBrains Mono', monospace";
+Chart.defaults.font.size      = 10;
+
+const PALETTE = [
+  '#38bdf8','#34d399','#fbbf24','#a78bfa',
+  '#f87171','#fb923c','#2dd4bf','#f472b6',
+];
+
+function kill(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function drawDaily(daily, dailySms) {
+  kill('daily');
+  const ctx = document.getElementById('c-daily');
+  if (!ctx) return;
+
+  const dateSet = new Set([...daily.map(d=>d.date), ...dailySms.map(d=>d.date)]);
+  const dates   = [...dateSet].sort();
+  const totMap  = Object.fromEntries(daily.map(d=>[d.date, d.cnt]));
+  const smsMap  = Object.fromEntries(dailySms.map(d=>[d.date, d.cnt]));
+
+  charts['daily'] = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: dates,
+      datasets:[
+        {
+          label:'All Requests',
+          data: dates.map(d=>totMap[d]||0),
+          backgroundColor:'rgba(56,189,248,0.22)',
+          borderColor:'#38bdf8',borderWidth:1,borderRadius:3,
+        },
+        {
+          label:'SMS Sent',
+          data: dates.map(d=>smsMap[d]||0),
+          backgroundColor:'rgba(52,211,153,0.35)',
+          borderColor:'#34d399',borderWidth:1,borderRadius:3,
+        },
+      ],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:10,padding:12,color:'#4b6585'}},
+        tooltip:{mode:'index',intersect:false},
+      },
+      scales:{
+        x:{grid:{color:'#101f35'},ticks:{maxTicksLimit:12}},
+        y:{grid:{color:'#101f35'},beginAtZero:true},
+      },
+    },
+  });
+}
+
+function drawApi(byApi) {
+  kill('api');
+  const ctx = document.getElementById('c-api');
+  if (!ctx) return;
+
+  const COLOR_MAP = { full:'#38bdf8', restricted:'#a78bfa', unknown:'#4b6585' };
+  const labels = byApi.map(a=>a.api);
+  const data   = byApi.map(a=>a.cnt);
+  const colors = labels.map(l=>COLOR_MAP[l]||PALETTE[3]);
+
+  charts['api'] = new Chart(ctx, {
+    type:'doughnut',
+    data:{ labels, datasets:[{ data, backgroundColor:colors, borderWidth:0 }] },
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:'62%',
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:10,padding:10,color:'#4b6585'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${N(ctx.raw)}`}},
+      },
+    },
+  });
+}
+
+function drawStatus(byStatus) {
+  kill('status');
+  const ctx = document.getElementById('c-status');
+  if (!ctx) return;
+
+  const groups = {'2xx':0,'3xx':0,'4xx':0,'5xx':0};
+  const gc     = {'2xx':'#34d399','3xx':'#fbbf24','4xx':'#f87171','5xx':'#a78bfa'};
+  byStatus.forEach(s => {
+    const g = Math.floor(s.status_code/100)+'xx';
+    if (g in groups) groups[g] += s.cnt;
+  });
+
+  const labels = Object.keys(groups).filter(k=>groups[k]>0);
+  charts['status'] = new Chart(ctx, {
+    type:'doughnut',
+    data:{
+      labels,
+      datasets:[{ data:labels.map(k=>groups[k]), backgroundColor:labels.map(k=>gc[k]), borderWidth:0 }],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,cutout:'62%',
+      plugins:{
+        legend:{position:'bottom',labels:{boxWidth:10,padding:10,color:'#4b6585'}},
+        tooltip:{callbacks:{label:ctx=>`${ctx.label}: ${N(ctx.raw)}`}},
+      },
+    },
+  });
+}
+
+function drawToken(byToken) {
+  kill('token');
+  const ctx = document.getElementById('c-token');
+  if (!ctx) return;
+
+  charts['token'] = new Chart(ctx, {
+    type:'bar',
+    data:{
+      labels: byToken.map(t=>t.token_name),
+      datasets:[{
+        data: byToken.map(t=>t.cnt),
+        backgroundColor: PALETTE,
+        borderWidth:0,borderRadius:5,
+      }],
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      indexAxis:'y',
+      plugins:{legend:{display:false}},
+      scales:{
+        x:{grid:{color:'#101f35'},beginAtZero:true},
+        y:{grid:{color:'#0c1728'}},
+      },
+    },
+  });
+}
+
+/* ── Boot ───────────────────────────────────────── */
+if (apiKey) {
+  tryLoad();
+} else {
+  setTimeout(()=>document.getElementById('key-input').focus(), 50);
+}
+</script>
+</body>
+</html>

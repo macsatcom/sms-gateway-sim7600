@@ -109,6 +109,8 @@ class LogEntry(BaseModel):
     endpoint: str
     status_code: int
     recipient: Optional[str] = None
+    client_ip: Optional[str] = None
+    api: Optional[str] = None
 
 
 class LogResponse(BaseModel):

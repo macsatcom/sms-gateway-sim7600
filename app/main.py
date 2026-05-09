@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Optional
 
 import state
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from state import TOKENS, request_logger, require_api_key
 
 from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, MONITOR_PORT, ModemError, ModemManager
@@ -67,7 +68,7 @@ app = FastAPI(
 )
 
 
-_NO_LOG = frozenset({"/docs", "/openapi.json", "/redoc", "/favicon.ico"})
+_NO_LOG = frozenset({"/docs", "/openapi.json", "/redoc", "/favicon.ico", "/stats", "/api/stats"})
 
 
 @app.middleware("http")
@@ -82,6 +83,8 @@ async def _log_requests(request: Request, call_next):
             endpoint=request.url.path,
             status_code=response.status_code,
             recipient=getattr(request.state, "recipient", None),
+            client_ip=request.client.host if request.client else None,
+            api="full",
         )
     return response
 
@@ -433,6 +436,28 @@ def debug_ports():
             "error": r.get("error"),
         })
     return {"ports": ports}
+
+
+# ── Statistics ────────────────────────────────────────────────────────────────
+
+@app.get("/stats", include_in_schema=False)
+def stats_page():
+    html_path = os.path.join(os.path.dirname(__file__), "stats.html")
+    with open(html_path) as f:
+        return HTMLResponse(f.read())
+
+
+@app.get(
+    "/api/stats",
+    tags=["Statistics"],
+    summary="Aggregated gateway statistics",
+    dependencies=[Depends(require_api_key)],
+)
+def get_stats(
+    range_: str = Query("7d", alias="range", description="Time window: 24h, 7d, 30d, all"),
+):
+    """Return aggregated request statistics for the statistics dashboard."""
+    return request_logger.get_stats(range_)
 
 
 # ── GPS endpoints ──────────────────────────────────────────────────────────────

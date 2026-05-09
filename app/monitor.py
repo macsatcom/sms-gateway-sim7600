@@ -54,9 +54,20 @@ class SmsMonitor:
                 s = serial.Serial(self._port, self._baud, timeout=1, dsrdtr=False, rtscts=False)
                 time.sleep(0.5)
                 s.flushInput()
+
+                # Wake up port and verify it responds to AT commands
+                s.write(b"AT\r\n")
+                time.sleep(0.3)
+                wake_resp = s.read(64).decode("latin-1")
+                if "OK" not in wake_resp:
+                    raise RuntimeError(f"port did not respond to AT (got {wake_resp!r})")
+
                 s.write(b"AT+CNMI=2,1,0,0,0\r\n")
                 time.sleep(0.3)
-                s.read(64)  # discard CNMI response
+                cnmi_resp = s.read(64).decode("latin-1")
+                if "OK" not in cnmi_resp:
+                    raise RuntimeError(f"AT+CNMI setup failed (got {cnmi_resp!r})")
+                print(f"[monitor] +CNMI configured on {self._port}", flush=True)
 
                 buf = ""
                 while True:

@@ -32,6 +32,8 @@ async def _log_requests(request: Request, call_next):
             endpoint=request.url.path,
             status_code=response.status_code,
             recipient=getattr(request.state, "recipient", None),
+            client_ip=request.client.host if request.client else None,
+            api="restricted",
         )
     return response
 
