@@ -151,6 +151,13 @@ class RequestLogger:
                     f"GROUP BY date ORDER BY date DESC LIMIT 60", p
                 )]))
 
+                recent_logs = [dict(r) for r in q(
+                    "SELECT id, timestamp, token_name, method, endpoint, status_code, "
+                    "recipient, client_ip, api FROM request_log "
+                    "ORDER BY timestamp DESC LIMIT 50",
+                    []
+                )]
+
         return {
             "range": range_,
             "total_requests": total,
@@ -165,6 +172,7 @@ class RequestLogger:
             "by_recipient": by_recipient,
             "daily_requests": daily,
             "daily_sms": daily_sms,
+            "recent_logs": recent_logs,
         }
 
     def get_logs(

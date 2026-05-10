@@ -17,9 +17,10 @@ services:
       CMD_TIMEOUT: ${CMD_TIMEOUT:-5.0}
       API_PORT:        ${API_PORT:-8000}
       RESTRICTED_PORT: ${RESTRICTED_PORT:-8007}
-      API_KEYS:    ${API_KEYS:-}
-      API_KEY:     ${API_KEY:-}
-      SIM_PIN:     ${SIM_PIN:-}
+      API_KEYS:        ${API_KEYS:-}
+      API_KEY:         ${API_KEY:-}
+      STATS_PASSWORD:  ${STATS_PASSWORD:-}
+      SIM_PIN:         ${SIM_PIN:-}
       LOG_DB:      ${LOG_DB:-/data/sms-gateway.db}
       GPS_AUTOSTART: ${GPS_AUTOSTART:-0}
       DEBUG:       ${DEBUG:-0}

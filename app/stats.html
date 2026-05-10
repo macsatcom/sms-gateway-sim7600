@@ -264,8 +264,8 @@ header {
   <div class="auth-box">
     <div class="auth-logo">SMS Gateway · SIM7600E</div>
     <h2>Gateway <em>Statistics</em></h2>
-    <p>Authenticate with your API key to access the dashboard.</p>
-    <input type="password" id="key-input" placeholder="X-API-Key" autocomplete="off" spellcheck="false">
+    <p>Enter the stats password to access the dashboard.</p>
+    <input type="password" id="key-input" placeholder="Stats password" autocomplete="off" spellcheck="false">
     <button onclick="submitKey()">Open Dashboard</button>
     <div id="auth-err">Invalid API key — check credentials and try again.</div>
   </div>
@@ -339,9 +339,7 @@ async function tryLoad() {
   }
   document.getElementById('auth-overlay').style.display = 'none';
   document.getElementById('dash').style.display = 'block';
-  const stats = await r.json();
-  const logs  = await fetchLogs();
-  render(stats, logs);
+  render(await r.json());
   startAR();
 }
 
@@ -350,13 +348,9 @@ async function fetchStats() {
   const r = await fetch(`/api/stats?range=${range}`, { headers: { 'X-API-Key': apiKey } });
   return r.ok ? r.json() : null;
 }
-async function fetchLogs() {
-  const r = await fetch('/logs?limit=50', { headers: { 'X-API-Key': apiKey } });
-  return r.ok ? r.json() : { entries: [] };
-}
 async function loadAll() {
-  const [stats, logs] = await Promise.all([fetchStats(), fetchLogs()]);
-  if (stats) render(stats, logs || { entries: [] });
+  const stats = await fetchStats();
+  if (stats) render(stats);
 }
 
 /* ── Range ──────────────────────────────────────── */
@@ -408,7 +402,7 @@ function esc(s) {
 }
 
 /* ── Render ─────────────────────────────────────── */
-function render(s, logs) {
+function render(s) {
   document.getElementById('last-upd').textContent =
     'updated ' + new Date().toLocaleTimeString();
 
@@ -502,7 +496,7 @@ function render(s, logs) {
     <div class="panel">
       <div class="panel-t">Recent Requests — last 50</div>
       <div class="scroll-box" style="max-height:420px">
-        ${logTable(logs.entries || [])}
+        ${logTable(s.recent_logs || [])}
       </div>
     </div>
   `;

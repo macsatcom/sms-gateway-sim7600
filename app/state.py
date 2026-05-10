@@ -43,6 +43,8 @@ def _load_tokens() -> dict[str, str]:
 
 TOKENS: dict[str, str] = _load_tokens()
 
+STATS_PASSWORD: str = os.environ.get("STATS_PASSWORD", "").strip()
+
 
 def require_api_key(request: Request, x_api_key: Optional[str] = Header(None)) -> str:
     """Validate X-API-Key, store token name on request state. Returns token name."""
@@ -56,6 +58,14 @@ def require_api_key(request: Request, x_api_key: Optional[str] = Header(None)) -
         raise HTTPException(status_code=401, detail="Invalid API key")
     request.state.token_name = name
     return name
+
+
+def require_stats_access(request: Request, x_api_key: Optional[str] = Header(None)) -> str:
+    """Accept the dedicated stats password OR any valid API key."""
+    if STATS_PASSWORD and x_api_key == STATS_PASSWORD:
+        request.state.token_name = "stats-dashboard"
+        return "stats-dashboard"
+    return require_api_key(request, x_api_key)
 
 
 # ── Request logger ─────────────────────────────────────────────────────────────

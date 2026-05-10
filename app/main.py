@@ -10,7 +10,7 @@ from typing import Optional
 import state
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from state import TOKENS, request_logger, require_api_key
+from state import TOKENS, request_logger, require_api_key, require_stats_access
 
 from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, MONITOR_PORT, ModemError, ModemManager
 from monitor import SmsMonitor
@@ -451,12 +451,15 @@ def stats_page():
     "/api/stats",
     tags=["Statistics"],
     summary="Aggregated gateway statistics",
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_stats_access)],
 )
 def get_stats(
     range_: str = Query("7d", alias="range", description="Time window: 24h, 7d, 30d, all"),
 ):
-    """Return aggregated request statistics for the statistics dashboard."""
+    """Return aggregated request statistics for the statistics dashboard.
+
+    Accepts either a valid API key or the dedicated STATS_PASSWORD.
+    """
     return request_logger.get_stats(range_)
 
 
