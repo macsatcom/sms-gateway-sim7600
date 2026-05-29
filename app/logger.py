@@ -95,7 +95,13 @@ class RequestLogger:
                 total = q(f"SELECT COUNT(*) FROM request_log {w}", p)[0][0]
 
                 w, p = cond("endpoint='/sms/send'", "status_code=202")
-                sms_sent = q(f"SELECT COUNT(*) FROM request_log {w}", p)[0][0]
+                sms_sent = q(
+                    f"SELECT SUM(CASE "
+                    f"  WHEN recipient IS NOT NULL "
+                    f"  THEN length(recipient) - length(replace(recipient,',','')) + 1 "
+                    f"  ELSE 1 END) "
+                    f"FROM request_log {w}", p
+                )[0][0] or 0
 
                 w, p = cond("status_code >= 400")
                 error_count = q(f"SELECT COUNT(*) FROM request_log {w}", p)[0][0]
@@ -111,7 +117,13 @@ class RequestLogger:
 
                 w, p = cond()
                 by_token = [dict(r) for r in q(
-                    f"SELECT token_name, COUNT(*) as cnt FROM request_log {w} "
+                    f"SELECT token_name, COUNT(*) as cnt, "
+                    f"SUM(CASE "
+                    f"  WHEN endpoint='/sms/send' AND status_code=202 AND recipient IS NOT NULL "
+                    f"  THEN length(recipient) - length(replace(recipient,',','')) + 1 "
+                    f"  WHEN endpoint='/sms/send' AND status_code=202 "
+                    f"  THEN 1 ELSE 0 END) as sms_msgs "
+                    f"FROM request_log {w} "
                     f"GROUP BY token_name ORDER BY cnt DESC", p
                 )]
 
@@ -229,7 +241,13 @@ class RequestLogger:
                         COUNT(*)                                                          AS request_count,
                         MAX(timestamp)                                                    AS last_used,
                         SUM(CASE WHEN endpoint = '/sms/send' AND status_code = 202
-                                 THEN 1 ELSE 0 END)                                       AS sms_sent
+                                 THEN 1 ELSE 0 END)                                       AS sms_sent,
+                        SUM(CASE
+                            WHEN endpoint = '/sms/send' AND status_code = 202
+                                 AND recipient IS NOT NULL
+                            THEN length(recipient) - length(replace(recipient,',','')) + 1
+                            WHEN endpoint = '/sms/send' AND status_code = 202
+                            THEN 1 ELSE 0 END)                                            AS sms_sent_messages
                     FROM request_log
                     GROUP BY token_name
                 """).fetchall()
@@ -245,6 +263,7 @@ class RequestLogger:
                     "request_count": s["request_count"],
                     "last_used": s["last_used"],
                     "sms_sent": int(s["sms_sent"] or 0),
+                    "sms_sent_messages": int(s["sms_sent_messages"] or 0),
                 })
             else:
                 result.append({
@@ -252,5 +271,6 @@ class RequestLogger:
                     "request_count": 0,
                     "last_used": None,
                     "sms_sent": 0,
+                    "sms_sent_messages": 0,
                 })
         return result

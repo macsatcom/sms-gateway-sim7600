@@ -93,6 +93,7 @@ class TokenStats(BaseModel):
     name: str
     request_count: int
     sms_sent: int
+    sms_sent_messages: int = 0
     last_used: Optional[str] = Field(None, description="ISO-8601 UTC timestamp of last request")
 
 

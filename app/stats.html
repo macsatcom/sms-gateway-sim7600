@@ -419,11 +419,11 @@ function render(s) {
         <div class="kpi-val">${N(s.total_requests)}</div>
         <div class="kpi-sub">range: ${s.range}</div>
       </div>
-      <div class="kpi g">
-        <div class="kpi-lbl">SMS Sent</div>
-        <div class="kpi-val">${N(s.sms_sent)}</div>
-        <div class="kpi-sub">successful sends (202)</div>
-      </div>
+        <div class="kpi g">
+          <div class="kpi-lbl">SMS Sent</div>
+          <div class="kpi-val">${N(s.sms_sent)}</div>
+          <div class="kpi-sub">individual messages sent</div>
+        </div>
       <div class="kpi ${errClass}">
         <div class="kpi-lbl">Error Rate</div>
         <div class="kpi-val">${errRate}%</div>
@@ -689,16 +689,31 @@ function drawToken(byToken) {
     type:'bar',
     data:{
       labels: byToken.map(t=>t.token_name),
-      datasets:[{
-        data: byToken.map(t=>t.cnt),
-        backgroundColor: PALETTE,
-        borderWidth:0,borderRadius:5,
-      }],
+      datasets:[
+        {
+          label:'Requests',
+          data: byToken.map(t=>t.cnt),
+          backgroundColor:'rgba(56,189,248,0.7)',
+          borderWidth:0,borderRadius:4,
+        },
+        {
+          label:'Messages',
+          data: byToken.map(t=>t.sms_msgs||0),
+          backgroundColor:'rgba(52,211,153,0.7)',
+          borderWidth:0,borderRadius:4,
+        },
+      ],
     },
     options:{
       responsive:true,maintainAspectRatio:false,
       indexAxis:'y',
-      plugins:{legend:{display:false}},
+      plugins:{
+        legend:{
+          display:true,
+          position:'bottom',
+          labels:{boxWidth:10,padding:10,color:'#4b6585'},
+        },
+      },
       scales:{
         x:{grid:{color:'#101f35'},beginAtZero:true},
         y:{grid:{color:'#0c1728'}},

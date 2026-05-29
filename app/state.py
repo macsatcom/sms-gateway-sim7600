@@ -46,6 +46,24 @@ TOKENS: dict[str, str] = _load_tokens()
 STATS_PASSWORD: str = os.environ.get("STATS_PASSWORD", "").strip()
 
 
+def get_client_ip(request: Request) -> Optional[str]:
+    """
+    Return the real client IP, unwrapping common reverse-proxy headers.
+
+    Priority:
+      1. X-Forwarded-For — take the leftmost (original client) address
+      2. X-Real-IP
+      3. TCP peer address (request.client.host) — fallback
+    """
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    xri = request.headers.get("x-real-ip")
+    if xri:
+        return xri.strip()
+    return request.client.host if request.client else None
+
+
 def require_api_key(request: Request, x_api_key: Optional[str] = Header(None)) -> str:
     """Validate X-API-Key, store token name on request state. Returns token name."""
     if not TOKENS:

@@ -10,7 +10,7 @@ from typing import Optional
 import state
 from fastapi import Depends, FastAPI, HTTPException, Path, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from state import TOKENS, request_logger, require_api_key, require_stats_access
+from state import TOKENS, get_client_ip, request_logger, require_api_key, require_stats_access
 
 from modem import BAUD_RATE, CMD_TIMEOUT, MODEM_PORT, MONITOR_PORT, ModemError, ModemManager
 from monitor import SmsMonitor
@@ -83,7 +83,7 @@ async def _log_requests(request: Request, call_next):
             endpoint=request.url.path,
             status_code=response.status_code,
             recipient=getattr(request.state, "recipient", None),
-            client_ip=request.client.host if request.client else None,
+            client_ip=get_client_ip(request),
             api="full",
         )
     return response
